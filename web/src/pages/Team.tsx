@@ -32,7 +32,7 @@ function TeamView({ t }: { t: TeamPage }) {
       />
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Card>
-          <CardHeader title="Season outlook" subtitle="From 20,000 simulated seasons" />
+          <CardHeader title="Season outlook" />
           <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
             <Stat label="Playoffs" value={prob(t.outlook.playoffPct)} />
             <Stat label="Title" value={prob(t.outlook.champPct)} />
@@ -60,7 +60,7 @@ function TeamView({ t }: { t: TeamPage }) {
 
       {t.strength.length > 0 && (
         <Card>
-          <CardHeader title="Positional strength this week" subtitle="Expected points from this team’s best lineup at each position vs the league average" />
+          <CardHeader title="Positional strength this week" />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
             {t.strength.map(s => (
               <div key={s.group} className="rounded-[10px] border border-line p-2.5">
@@ -75,7 +75,7 @@ function TeamView({ t }: { t: TeamPage }) {
 
       {t.schedule.length > 0 && (
         <Card>
-          <CardHeader title="Remaining schedule" subtitle="Projected best-lineup points and win probability" right={team.rosterId === myTeamId ? <Button size="sm" onClick={() => navigate(pathFor(leagueId, 'lineup'))}>Start/sit <ArrowRight size={14} /></Button> : undefined} />
+          <CardHeader title="Remaining schedule" right={team.rosterId === myTeamId ? <Button size="sm" onClick={() => navigate(pathFor(leagueId, 'lineup'))}>Start/sit <ArrowRight size={14} /></Button> : undefined} />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {t.schedule.map(s => (
               <div key={s.week} className="rounded-[10px] border border-line p-2.5">
@@ -89,7 +89,7 @@ function TeamView({ t }: { t: TeamPage }) {
       )}
 
       <Card pad={false}>
-        <div className="px-4 pt-4 sm:px-5"><CardHeader title="Roster" subtitle={`${t.roster.length} players · values in this league’s scoring`} /></div>
+        <div className="px-4 pt-4 sm:px-5"><CardHeader title="Roster" subtitle={`${t.roster.length} players`} /></div>
         {byPos.map(g => (
           <div key={g.pos} className="border-t border-line">
             <div className="eyebrow bg-surface-2 px-4 py-1.5 sm:px-5">{g.pos} · {g.players.length}</div>

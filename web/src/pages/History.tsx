@@ -15,7 +15,7 @@ export default function HistoryPage() {
   const completed = h.seasons.filter(s => s.complete);
   return (
     <div className="space-y-5">
-      <PageHeader title="League history" subtitle={`${h.seasons.length} season${h.seasons.length === 1 ? '' : 's'} on Sleeper, linked through each league’s previous-season ID. Records follow managers across seasons.`} />
+      <PageHeader title="League history" />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {completed.length === 0 && <Card className="sm:col-span-2"><Empty title="No completed seasons yet" /></Card>}
         {completed.map(s => (
@@ -28,7 +28,7 @@ export default function HistoryPage() {
       </div>
 
       <Card pad={false}>
-        <div className="px-4 pt-4 sm:px-5"><CardHeader title="All-time standings" subtitle="Regular season, every season in the chain" /></div>
+        <div className="px-4 pt-4 sm:px-5"><CardHeader title="All-time standings" /></div>
         <div className="overflow-x-auto scroll-thin">
           <table className="tbl num text-[13px]">
             <thead><tr><th>Manager</th><th className="r">Seasons</th><th className="r">Record</th><th className="r">Win %</th><th className="r">Points for</th><th className="r">Titles</th><th className="r">Finals</th></tr></thead>
@@ -50,7 +50,7 @@ export default function HistoryPage() {
       </Card>
 
       <Card>
-        <CardHeader title="Head-to-head" subtitle="Row manager’s regular-season record against each column manager" />
+        <CardHeader title="Head-to-head" />
         <div className="overflow-x-auto scroll-thin">
           <table className="tbl num text-[12px]">
             <thead><tr><th />{owners.map(o => <th key={o} className="text-center">{name(o).slice(0, 12)}</th>)}</tr></thead>
@@ -74,7 +74,7 @@ export default function HistoryPage() {
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
-          <CardHeader title="Record book" subtitle="Highest and lowest single-week scores" />
+          <CardHeader title="Record book" />
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <div className="eyebrow mb-1">Highest</div>

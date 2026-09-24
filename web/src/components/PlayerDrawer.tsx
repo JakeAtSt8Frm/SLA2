@@ -110,7 +110,6 @@ export function PlayerDrawer() {
                       </div>
                     ))}
                   </dl>
-                  <p className="mt-2 text-[12px] text-ink-3">The model starts from Sleeper’s component projection rescored with your settings, then corrects it using form, role, per-snap big-play rates, matchup and Vegas context.</p>
                 </Card>
               )}
 

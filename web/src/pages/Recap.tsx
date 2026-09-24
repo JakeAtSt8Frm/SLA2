@@ -22,7 +22,7 @@ export default function RecapPage() {
   const steps = ['var(--seq-6)', 'var(--seq-5)', 'var(--seq-4)', 'var(--seq-3)', 'var(--seq-2)', 'var(--seq-1)', 'var(--seq-1)', 'var(--seq-1)'];
   return (
     <div className="space-y-5">
-      <PageHeader eyebrow={`${boot.league.season} · through week ${r.weekly[r.weekly.length - 1].week}`} title="Season wrapped" subtitle="The story of the season so far: awards, luck, lineup management and the players who carried each team." />
+      <PageHeader eyebrow={`${boot.league.season} · through week ${r.weekly[r.weekly.length - 1].week}`} title="Season wrapped" />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         {r.awards.map(a => {
           const Icon = ICONS[a.key] ?? Trophy;
@@ -39,7 +39,7 @@ export default function RecapPage() {
       </div>
 
       <Card>
-        <CardHeader title="Weekly scores" subtitle="Darker = higher score that week (rank within the week). W/L marks each result." />
+        <CardHeader title="Weekly scores" />
         <div className="overflow-x-auto scroll-thin">
           <div className="grid min-w-[480px] gap-1" style={{ gridTemplateColumns: `minmax(150px,1.4fr) repeat(${r.weekly.length}, minmax(54px,1fr))` }}>
             <div />
@@ -89,7 +89,7 @@ export default function RecapPage() {
       </Card>
 
       <Card>
-        <CardHeader title="Team MVPs" subtitle="Most points scored from each team’s starting lineup" />
+        <CardHeader title="Team MVPs" />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {r.mvps.map(m => (
             <div key={m.rosterId} className="rounded-[12px] border border-line p-3">

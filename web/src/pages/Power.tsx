@@ -3,7 +3,7 @@ import { usePower } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { fmt, record, teamColor } from '../lib/format.ts';
 import { TrendChart } from '../charts/charts.tsx';
-import { Card, CardHeader, ErrorState, InfoTip, Meter, PageHeader, PageSkeleton, PlayerLink, Pos, Segmented, TeamAvatar, TeamLink, cx } from '../components/ui.tsx';
+import { Card, CardHeader, ErrorState, Meter, PageHeader, PageSkeleton, PlayerLink, Pos, Segmented, TeamAvatar, TeamLink, cx } from '../components/ui.tsx';
 
 export default function PowerPage() {
   const { leagueId, myTeamId, teamName } = useApp();
@@ -13,7 +13,6 @@ export default function PowerPage() {
   if (q.isPending) return <PageSkeleton />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   const p = q.data;
-  const w = p.rankings[0]?.weights;
   const highlight = [myTeamId, focus].filter((x): x is number => x !== null);
   const maxValue = Math.max(...p.rankings.map(r => (metric === 'value' ? r.rosterValue : r.dynastyValue)), 1);
   return (
@@ -21,7 +20,6 @@ export default function PowerPage() {
       <PageHeader
         eyebrow={p.week ? `Week ${p.week}` : 'Final'}
         title="Power rankings"
-        subtitle={w ? `A blend of what teams have done and what their rosters project to do. This week: season scoring ${Math.round(w.season * 100)}%, all-play ${Math.round(w.allPlay * 100)}%, recent form ${Math.round(w.recent * 100)}%, rest-of-season outlook ${Math.round(w.outlook * 100)}%. The outlook carries more weight early in the year.` : undefined}
       />
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
         <Card pad={false}>
@@ -51,7 +49,7 @@ export default function PowerPage() {
         </Card>
         <div className="space-y-5">
           <Card>
-            <CardHeader title="Power over the season" subtitle="Performance-only score after each week. Hover a team to compare." right={<InfoTip>History uses results only (points, all-play, recent form), because the projection piece can only be computed for the current roster.</InfoTip>} />
+            <CardHeader title="Power over the season" />
             {p.history.length < 2 ? <div className="py-8 text-center text-[13px] text-ink-3">The trend appears after two completed weeks.</div> : (
               <TrendChart
                 labels={p.history.map(h => h.week)}
@@ -70,7 +68,7 @@ export default function PowerPage() {
             </div>
           </Card>
           <Card>
-            <CardHeader title="Roster value" subtitle="Sum of player values in this league’s scoring" right={<Segmented label="Value type" value={metric} onChange={setMetric} options={[{ value: 'value', label: 'Overall' }, { value: 'dynasty', label: 'Dynasty' }]} />} />
+            <CardHeader title="Roster value" right={<Segmented label="Value type" value={metric} onChange={setMetric} options={[{ value: 'value', label: 'Overall' }, { value: 'dynasty', label: 'Dynasty' }]} />} />
             <div className="space-y-2">
               {[...p.rankings].sort((a, b) => (metric === 'value' ? b.rosterValue - a.rosterValue : b.dynastyValue - a.dynastyValue)).map(r => {
                 const v = metric === 'value' ? r.rosterValue : r.dynastyValue;

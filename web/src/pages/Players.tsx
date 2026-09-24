@@ -28,7 +28,7 @@ export default function PlayersPage() {
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   return (
     <div className="space-y-5">
-      <PageHeader title="Players" subtitle={`${q.data.players.length.toLocaleString('en-US')} players scored with ${boot.league.name} settings. Click any name for the full forecast, projection breakdown and game log.`} />
+      <PageHeader title="Players" />
       <div className="flex flex-wrap items-center gap-2">
         <label className="relative flex min-w-[220px] flex-1 items-center sm:max-w-xs">
           <Search size={15} className="pointer-events-none absolute left-3 text-ink-3" aria-hidden />

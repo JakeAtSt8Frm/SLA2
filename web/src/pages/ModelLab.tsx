@@ -1,4 +1,4 @@
-import { useModel, useTracking, type Metrics, type ModelReport } from '../lib/api.ts';
+import { useModel, useTracking, type Metrics } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { fmt, pct, FEATURE_LABELS } from '../lib/format.ts';
 import { GroupedBars, HBars } from '../charts/charts.tsx';
@@ -24,7 +24,6 @@ export default function ModelLab() {
       <PageHeader
         eyebrow={`Model ${r.meta.version} · trained ${new Date(r.meta.trainedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
         title="Model lab"
-        subtitle="How the projections are built and how accurate they have been, measured on a season the model never saw (2025) and on this league’s real rosters."
       />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card><Stat label="Error vs Sleeper projection (2025)" value={`−${fmt(improvement * 100, 1)}%`} sub={`MAE ${fmt(h.model.mae, 2)} vs ${fmt(h.provider.mae, 2)} pts · 95% CI of the gap ${fmt(r.maeDeltaCI2025[0], 2)} to ${fmt(r.maeDeltaCI2025[1], 2)}`} tone="good" /></Card>
@@ -34,9 +33,8 @@ export default function ModelLab() {
       </div>
 
       <Card>
-        <CardHeader title="Accuracy by position — 2025 holdout" subtitle={`Mean absolute error in league points (lower is better), ${h.model.n.toLocaleString('en-US')} player-games from the realistic decision pool: roughly twice this league’s starters at each position`} />
+        <CardHeader title="Accuracy by position — 2025 holdout" subtitle={`Mean absolute error, league points (lower is better) · ${h.model.n.toLocaleString('en-US')} player-games`} />
         <GroupedBars categories={POS} series={SERIES.map(s => ({ ...s, values: POS.map(p => h[s.key].byPos[p]?.mae ?? 0) }))} format={v => `${fmt(v, 2)} pts`} yLabel="Mean absolute error by position" />
-        <p className="mt-2 text-[12px] text-ink-3">The biggest gains are at DL and DB, where the provider projects tackles well but underrates big plays (sacks 9 pts, interceptions 10, pass breakups 3 in this league). Offense is close to the provider, which is already strong there.</p>
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -46,8 +44,8 @@ export default function ModelLab() {
 
       {bt && (
         <Card>
-          <CardHeader title="Lineup backtest on Neighbas in Paris 2025" subtitle={`${bt.teamWeeks} real team-weeks. Each roster’s best legal lineup was set by each method using only pregame injury designations, then scored with what happened.`} />
-          <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <CardHeader title="Lineup backtest on Neighbas in Paris 2025" subtitle={`${bt.teamWeeks} team-weeks`} />
+          <div className="grid gap-5 md:grid-cols-2">
             <div className="space-y-3">
               {([['Hindsight-perfect lineup', bt.perTeamWeek.optimal, 1], ['SLA model', bt.perTeamWeek.model, bt.captureRate.model], ['Sleeper projection', bt.perTeamWeek.provider, bt.captureRate.provider], ['What managers started', bt.perTeamWeek.manager, bt.captureRate.manager]] as const).map(([label, pts, cap]) => (
                 <div key={label}>
@@ -55,10 +53,6 @@ export default function ModelLab() {
                   <Meter value={cap} color={label === 'SLA model' ? 'var(--team-1)' : label === 'Sleeper projection' ? 'var(--team-2)' : 'var(--ink-3)'} label={label} />
                 </div>
               ))}
-            </div>
-            <div className="text-[13px] text-ink-2">
-              <p>Nobody can capture 100%: a perfect lineup needs hindsight. Against Sleeper’s own numbers, the model’s lineup edge is small (+{fmt(bt.modelMinusProvider, 1)} points per week) and, over one season of six teams, not statistically certain{bt.modelMinusProviderCI ? ` (95% CI ${fmt(bt.modelMinusProviderCI[0], 1)} to ${fmt(bt.modelMinusProviderCI[1], 1)})` : ''}; the per-player accuracy gains above are the steadier evidence. The big, reliable gain versus what managers actually scored comes from setting a complete, legal, injury-aware lineup across all 21 slots every week, which this app does automatically.</p>
-              <p className="mt-2">TypeScript runtime parity: {bt.parity.checked} predictions match the trained model to within {bt.parity.maxDiff.toExponential(1)} points.</p>
             </div>
           </div>
         </Card>
@@ -96,7 +90,6 @@ export default function ModelLab() {
       </div>
 
       <Tracking />
-      <Method r={r} />
     </div>
   );
 }
@@ -133,34 +126,13 @@ function Tracking() {
   const q = useTracking(leagueId);
   return (
     <Card>
-      <CardHeader title="Live track record" subtitle="Forecasts this server saved before kickoff, scored after each week is final. This is the leakage-free test." />
+      <CardHeader title="Live track record" />
       {q.data && q.data.weeks.length ? (
         <table className="tbl num text-[13px]">
           <thead><tr><th>Week</th><th className="r">Players</th><th className="r">SLA MAE</th><th className="r">Sleeper MAE</th><th className="r">Bias</th><th className="r">Pair accuracy</th></tr></thead>
           <tbody>{q.data.weeks.map(w => <tr key={w.week}><td>Week {w.week}</td><td className="r">{w.players}</td><td className={cx('r font-semibold', w.maeModel < w.maeProvider && 'text-good-ink')}>{fmt(w.maeModel, 2)}</td><td className="r">{fmt(w.maeProvider, 2)}</td><td className="r text-ink-2">{fmt(w.biasModel, 2)}</td><td className="r">{w.pairAcc === null ? '—' : pct(w.pairAcc, 1)}</td></tr>)}</tbody>
         </table>
-      ) : <Empty title="Collecting">Snapshots started this week. Results appear once a week with saved pregame forecasts is final. Keep the server running (or open the app) before kickoffs.</Empty>}
-    </Card>
-  );
-}
-
-function Method({ r }: { r: ModelReport }) {
-  return (
-    <Card>
-      <CardHeader title="How it works" />
-      <div className="grid gap-6 text-[13px] leading-relaxed text-ink-2 md:grid-cols-2">
-        <div className="space-y-3">
-          <p><b className="text-ink">1. Your scoring, exactly.</b> Every raw stat line and projection is multiplied by the league’s own scoring settings. Replaying three seasons of Sleeper matchups reproduces all 9,874 official player scores and every team total exactly.</p>
-          <p><b className="text-ink">2. Start from the best public forecast.</b> Sleeper’s component projections (Rotowire) are rescored with your settings, not Sleeper’s PPR totals.</p>
-          <p><b className="text-ink">3. Correct it where it is predictably wrong.</b> Gradient-boosted trees ({r.meta.iterations} rounds, {r.meta.trainingRows.toLocaleString('en-US')} player-games, {r.meta.seasons[0]}–{r.meta.seasons[r.meta.seasons.length - 1]}) learn the gap between projection and outcome from recent form, snap share and its trend, per-snap tackle and big-play rates, how often the player beats his projection, opponent points allowed to the position, opponent pace, Vegas implied totals and spreads, rest, age and venue.</p>
-          <p><b className="text-ink">4. Separate “will he play” from “how much”.</b> The trees predict points <i>if he plays</i>. Chance to play comes from the injury tag, using how often tagged players actually suited up.</p>
-        </div>
-        <div className="space-y-3">
-          <p><b className="text-ink">5. Honest uncertainty.</b> Floors, ceilings, boom/bust and win odds come from out-of-sample error distributions by position and projection level, not assumed bell curves.</p>
-          <p><b className="text-ink">6. Decisions, not just rankings.</b> Lineups are solved exactly (Hungarian assignment across all 21 slots), so superflex and flex spots compete for players the right way. Waiver and trade values are measured as changes in your best lineup, week by week.</p>
-          <p><b className="text-ink">Limits.</b> Historical projections were final versions that could reflect late news, so part of the provider’s historical accuracy may be optimistic; the live track record above removes that doubt over time. Rest-of-season injury timelines are stated assumptions (Sleeper publishes no return dates). Simulations treat players on different NFL teams as independent. The model is trained on this league’s scoring. It still works for other leagues, but its corrections are tuned here.</p>
-        </div>
-      </div>
+      ) : <Empty title="Collecting">Appears after the first week with saved forecasts is final.</Empty>}
     </Card>
   );
 }

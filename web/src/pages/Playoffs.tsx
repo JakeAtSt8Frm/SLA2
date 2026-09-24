@@ -17,10 +17,10 @@ export default function PlayoffsPage() {
       <PageHeader
         eyebrow={`${p.sims.toLocaleString('en-US')} simulated seasons`}
         title="Playoff odds"
-        subtitle={`Every remaining game is simulated from each team’s best projected lineup that week (byes and injuries included). Top ${p.playoffTeams} make the playoffs; ties are broken by points for. The bracket starts in week ${p.playoffWeekStart}.`}
+        subtitle={`Top ${p.playoffTeams} make the playoffs · bracket starts week ${p.playoffWeekStart}`}
       />
       <Card pad={false}>
-        <div className="px-4 pt-4 sm:px-5"><CardHeader title="Odds" subtitle="Leverage shows how much this week’s result swings each team’s playoff odds" /></div>
+        <div className="px-4 pt-4 sm:px-5"><CardHeader title="Odds" /></div>
         <div className="overflow-x-auto scroll-thin">
           <table className="tbl num text-[13px]">
             <thead>
@@ -50,7 +50,7 @@ export default function PlayoffsPage() {
       </Card>
 
       <Card>
-        <CardHeader title="Final standing distribution" subtitle="Share of simulations finishing in each place (darker = more likely)" />
+        <CardHeader title="Final standing distribution" />
         <div className="overflow-x-auto scroll-thin">
           <div className="grid min-w-[520px] gap-1" style={{ gridTemplateColumns: `minmax(160px,1.3fr) repeat(${seeds}, minmax(52px,1fr))` }}>
             <div />
@@ -63,11 +63,10 @@ export default function PlayoffsPage() {
             ))}
           </div>
         </div>
-        <p className="mt-2 text-[12px] text-ink-3">Places 1–{p.playoffTeams} make the playoffs.</p>
       </Card>
 
       <Card>
-        <CardHeader title="Remaining schedule" subtitle="Projected win probability for every regular-season game left" />
+        <CardHeader title="Remaining schedule" />
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {weeks.map(w => (
             <div key={w} className="rounded-[12px] border border-line p-3">
@@ -90,7 +89,7 @@ export default function PlayoffsPage() {
       </Card>
 
       <Card>
-        <CardHeader title="Projected points for" subtitle="Current points plus simulated rest of regular season" />
+        <CardHeader title="Projected points for" />
         <div className="space-y-2">
           {[...p.teams].sort((a, b) => b.meanPointsFor - a.meanPointsFor).map(t => {
             const max = Math.max(...p.teams.map(x => x.meanPointsFor));

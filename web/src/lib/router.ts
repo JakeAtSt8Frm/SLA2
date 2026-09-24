@@ -4,9 +4,9 @@ export const DEFAULT_LEAGUE = '1312656463549726720';
 
 export type Page =
   | 'hub' | 'lineup' | 'waivers' | 'matchups' | 'power' | 'playoffs' | 'players'
-  | 'trade' | 'recap' | 'history' | 'model' | 'scoring' | 'team' | 'teams' | 'transactions';
+  | 'trade' | 'recap' | 'history' | 'model' | 'defense' | 'team' | 'teams' | 'transactions';
 
-const PAGES = new Set<Page>(['hub', 'lineup', 'waivers', 'matchups', 'power', 'playoffs', 'players', 'trade', 'recap', 'history', 'model', 'scoring', 'team', 'teams', 'transactions']);
+const PAGES = new Set<Page>(['hub', 'lineup', 'waivers', 'matchups', 'power', 'playoffs', 'players', 'trade', 'recap', 'history', 'model', 'defense', 'team', 'teams', 'transactions']);
 
 export interface Route { leagueId: string; page: Page; param: string | null; search: URLSearchParams }
 

@@ -21,7 +21,6 @@ export default function LineupPage() {
       <PageHeader
         eyebrow={`Week ${l.week} · ${teamName(myTeamId)}`}
         title="Start / sit"
-        subtitle="Your best legal lineup across every slot at once (superflex and IDP included), respecting kickoff locks. Expected points = chance to play × points if he plays."
       />
       <Card>
         <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
@@ -38,11 +37,11 @@ export default function LineupPage() {
       <Warnings warnings={l.warnings} />
 
       {changes > 0 ? <Swaps l={l} /> : (
-        <Card className="flex items-center gap-3"><Check className="text-good" aria-hidden /><div><div className="font-semibold">Your lineup is already optimal.</div><div className="text-[13px] text-ink-2">No bench player beats a starter in expected points. Check back after injury news.</div></div></Card>
+        <Card className="flex items-center gap-3"><Check className="text-good" aria-hidden /><div className="font-semibold">Lineup is optimal.</div></Card>
       )}
 
       <Card pad={false}>
-        <div className="px-4 pt-4 sm:px-5"><CardHeader title="Lineup" subtitle="Current starter → recommended starter, slot by slot" /></div>
+        <div className="px-4 pt-4 sm:px-5"><CardHeader title="Lineup" /></div>
         <div className="overflow-x-auto scroll-thin">
           <table className="tbl text-[13px]">
             <thead>
@@ -71,7 +70,7 @@ export default function LineupPage() {
       </Card>
 
       <Card pad={false}>
-        <div className="px-4 pt-4 sm:px-5"><CardHeader title="Bench" subtitle="Sorted by expected points this week" /></div>
+        <div className="px-4 pt-4 sm:px-5"><CardHeader title="Bench" /></div>
         {l.bench.length === 0 ? <Empty title="No bench players" /> : (
           <div className="overflow-x-auto scroll-thin">
             <table className="tbl text-[13px]">
@@ -96,7 +95,7 @@ export default function LineupPage() {
 
       {l.reserve.length > 0 && (
         <Card>
-          <CardHeader title="IR & taxi" subtitle="Not eligible to start until activated" />
+          <CardHeader title="IR & taxi" />
           <div className="flex flex-wrap gap-2">
             {l.reserve.map(r => r && <span key={r.id} className="inline-flex items-center gap-2 rounded-[9px] border border-line px-2.5 py-1.5 text-[13px]"><Pos pos={r.pos} /><PlayerLink id={r.id} name={r.name} /><span className="text-[11px] text-ink-3">{r.slot}</span><Injury status={r.injury} /></span>)}
           </div>
@@ -115,8 +114,7 @@ function Warnings({ warnings }: { warnings: LineupReady['warnings'] }) {
       {others.map((w, i) => <Notice key={i} tone={w.kind === 'no-projection' ? 'info' : 'warn'}>{w.message}</Notice>)}
       {q.length > 0 && (
         <Notice>
-          {q.length === 1 ? 'One starter is' : `${q.length} starters are`} questionable or doubtful: <b className="text-ink">{q.map(w => w.message.replace(/ is (Questionable|Doubtful)$/, '')).join(', ')}</b>.
-          {' '}Questionable players have suited up 68% of the time (2020–25 official reports); expected points already account for that. Re-check after Friday’s final reports.
+          Questionable/doubtful: <b className="text-ink">{q.map(w => w.message.replace(/ is (Questionable|Doubtful)$/, '')).join(', ')}</b>
         </Notice>
       )}
     </div>
@@ -148,7 +146,7 @@ function Swaps({ l }: { l: LineupReady }) {
   const find = (id: string | null) => (id ? all.find(r => r?.id === id) ?? null : null);
   return (
     <Card>
-      <CardHeader title="Recommended changes" subtitle="Confidence = how often the player you start outscores the one you bench, across 4,000 simulations" />
+      <CardHeader title="Recommended changes" />
       <div className="grid gap-3 md:grid-cols-2">
         {l.swaps.map(s => {
           const start = find(s.startId), sit = find(s.sitId);
@@ -176,7 +174,7 @@ function Swaps({ l }: { l: LineupReady }) {
                 <Meter value={s.confidence} color={close ? 'var(--warn)' : 'var(--good)'} label="Confidence" />
                 <span className="num shrink-0 text-[12px] font-semibold">{prob(s.confidence)}</span>
               </div>
-              {close && <div className="mt-1.5 flex items-center gap-1 text-[12px] text-ink-2"><CircleAlert size={12} aria-hidden /> Close call: nearly a coin flip. Lean on news and your read of the matchup.</div>}
+              {close && <div className="mt-1.5 flex items-center gap-1 text-[12px] text-ink-2"><CircleAlert size={12} aria-hidden /> Close call</div>}
             </div>
           );
         })}
@@ -189,7 +187,6 @@ function Swaps({ l }: { l: LineupReady }) {
           })}
         </div>
       )}
-      <p className="mt-3 text-[12px] text-ink-3">Sleeper won’t apply these for you. Make the moves in the Sleeper app before each game locks.</p>
     </Card>
   );
 }

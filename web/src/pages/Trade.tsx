@@ -29,7 +29,7 @@ export default function TradePage() {
   const run = () => trade.mutate({ a, b, aGives, bGives });
   return (
     <div className="space-y-5">
-      <PageHeader title="Trade lab" subtitle="Build any trade. Both rosters are re-optimized every remaining week, with values in this league’s scoring and playoff odds re-simulated." />
+      <PageHeader title="Trade lab" />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
         <RosterPicker rosterId={a} onTeam={v => { setA(v); setAGives([]); if (v === b) setB(a); trade.reset(); }} exclude={b} players={byOwner.get(a) ?? []} selected={aGives} onPick={id => pick('a', id)} />
         <div className="flex items-center justify-center"><Button variant="ghost" onClick={swapTeams} title="Swap sides"><ArrowLeftRight size={18} /><span className="sr-only">Swap sides</span></Button></div>
@@ -97,7 +97,6 @@ function Result({ r }: { r: Trade }) {
         <Scale className="shrink-0 text-ink-3" aria-hidden />
         <div>
           <div className="text-[18px] font-semibold">{verdict}</div>
-          <div className="text-[13px] text-ink-2">{r.note}</div>
         </div>
       </Card>
       <div className="grid gap-4 lg:grid-cols-2">

@@ -19,6 +19,7 @@ export type Trade = Awaited<ReturnType<typeof V.trade>>;
 export type Recap = Awaited<ReturnType<typeof V.recap>>;
 export type History = Awaited<ReturnType<typeof V.history>>;
 export type Transactions = Awaited<ReturnType<typeof V.transactions>>;
+export type Defense = Awaited<ReturnType<typeof V.defense>>;
 export type Forecast = NonNullable<PlayerRow['week']>;
 export interface LeagueSearchResult { user: { id: string; name: string; avatar: string | null }; leagues: { id: string; name: string; season: number; teams: number; avatar: string | null; status: string }[] }
 
@@ -58,6 +59,7 @@ export const usePlayer = (id: string, pid: string | null) => useQuery({ queryKey
 export const useRecap = (id: string) => useQuery({ queryKey: ['recap', id], queryFn: () => request<Recap>(`${base(id)}/recap`), staleTime: 5 * MIN });
 export const useHistory = (id: string) => useQuery({ queryKey: ['history', id], queryFn: () => request<History>(`${base(id)}/history`), staleTime: 30 * MIN });
 export const useTransactions = (id: string) => useQuery({ queryKey: ['transactions', id], queryFn: () => request<Transactions>(`${base(id)}/transactions`), staleTime: 2 * MIN });
+export const useDefense = (id: string, season?: number) => useQuery({ queryKey: ['defense', id, season ?? 'default'], queryFn: () => request<Defense>(`${base(id)}/defense${season ? `?season=${season}` : ''}`), staleTime: 10 * MIN, placeholderData: prev => prev });
 export const useModel = () => useQuery({ queryKey: ['model'], queryFn: () => request<ModelReport>('/api/model'), staleTime: 30 * MIN });
 export const useTracking = (id: string) => useQuery({ queryKey: ['tracking', id], queryFn: () => request<Tracking>(`${base(id)}/tracking`), staleTime: 10 * MIN });
 export const useTrade = (id: string) => useMutation({ mutationFn: (body: { a: number; b: number; aGives: string[]; bGives: string[] }) => request<Trade>(`${base(id)}/trade`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });

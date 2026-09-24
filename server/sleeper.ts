@@ -11,7 +11,7 @@ const NFLVERSE_GAMES = 'https://raw.githubusercontent.com/nflverse/nfldata/maste
 let active = 0;
 const queue: (() => void)[] = [];
 async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
-  if (active >= 8) await new Promise<void>(resolve => queue.push(resolve));
+  if (active >= 6) await new Promise<void>(resolve => queue.push(resolve));
   active++;
   try {
     return await fn();
@@ -25,7 +25,7 @@ async function fetchText(url: string): Promise<string> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const response = await withSlot(() => fetch(url, { signal: AbortSignal.timeout(20_000), headers: { Accept: 'application/json, text/csv' } }));
+      const response = await withSlot(() => fetch(url, { signal: AbortSignal.timeout(60_000), headers: { Accept: 'application/json, text/csv' } }));
       if (response.status === 404) throw Object.assign(new Error(`404 ${url}`), { permanent: true, status: 404 });
       if (!response.ok) throw new Error(`${response.status} ${url}`);
       return await response.text();

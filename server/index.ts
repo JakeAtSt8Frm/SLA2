@@ -66,6 +66,10 @@ app.post('/api/leagues/:id/trade', async c => {
 });
 app.get('/api/leagues/:id/history', async c => json(c, await views.history(leagueId(c)), 300));
 app.get('/api/leagues/:id/recap', async c => json(c, await views.recap(leagueId(c)), 60));
+app.get('/api/leagues/:id/defense', async c => {
+  const season = c.req.query('season');
+  return json(c, await views.defense(leagueId(c), season ? Number(season) : undefined), 120);
+});
 app.get('/api/leagues/:id/transactions', async c => json(c, await views.transactions(leagueId(c)), 60));
 app.get('/api/leagues/:id/tracking', async c => json(c, await trackRecord(await getCore(leagueId(c))), 300));
 app.get('/api/users/:username/leagues', async c => {

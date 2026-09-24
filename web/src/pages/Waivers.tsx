@@ -18,14 +18,13 @@ export default function WaiversPage() {
       <PageHeader
         eyebrow={`Week ${w.week} · ${teamName(myTeamId)}`}
         title="Waiver wire"
-        subtitle="Every free agent is tested in your roster: how many expected points he adds to your best legal lineup each remaining week, minus what you lose from the player you’d drop."
       />
       <Card>
         <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
           <Stat label="Roster spots" value={`${w.rosterCount} / ${w.rosterLimit}`} sub={w.rosterCount >= w.rosterLimit ? 'Full: every add needs a drop' : `${w.rosterLimit - w.rosterCount} open`} />
           <Stat label="FAAB remaining" value={`$${w.faabRemaining}`} />
-          <Stat label="Horizon" value={`Weeks ${w.horizon[0]}–${w.horizon[w.horizon.length - 1]}`} sub="Playoff weeks included; later weeks count a bit less" />
-          <Stat label="Useful free agents" value={String(w.recommendations.length)} sub="would start for you at least once" />
+          <Stat label="Horizon" value={`Weeks ${w.horizon[0]}–${w.horizon[w.horizon.length - 1]}`} />
+          <Stat label="Useful free agents" value={String(w.recommendations.length)} />
         </div>
       </Card>
       <Recommendations recs={w.recommendations} />
@@ -39,7 +38,7 @@ function Recommendations({ recs }: { recs: Waivers['recommendations'] }) {
   if (!recs.length) return <Card><Empty title="No free agent improves your lineup">Your roster is deeper than the wire at every slot. Nice.</Empty></Card>;
   return (
     <Card>
-      <CardHeader title="Top pickups for you" subtitle="Ranked by net rest-of-season points added to your best lineup. Each row is one move; the suggested drop is your cheapest player to lose, so after one claim the list changes." right={<InfoTip>Net gain = discounted sum of weekly best-lineup improvements with the pickup, after dropping the suggested player. Drop suggestions weigh both lineup impact and dynasty value, so young upside players aren’t cut for a one-week rental.</InfoTip>} />
+      <CardHeader title="Top pickups for you" right={<InfoTip>Net gain = discounted sum of weekly best-lineup improvements with the pickup, after dropping the suggested player. Drop suggestions weigh both lineup impact and dynasty value, so young upside players aren’t cut for a one-week rental.</InfoTip>} />
       <div className="space-y-3">
         {recs.slice(0, shown).map((r, i) => (
           <div key={r.id} className="grid gap-3 rounded-[12px] border border-line p-3.5 md:grid-cols-[28px_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)] md:items-center">
@@ -63,7 +62,6 @@ function Recommendations({ recs }: { recs: Waivers['recommendations'] }) {
         ))}
       </div>
       {shown < recs.length && <div className="mt-3 flex justify-center"><Button onClick={() => setShown(s => s + 10)}>Show more</Button></div>}
-      <p className="mt-3 text-[12px] text-ink-3">FAAB ranges are guidance scaled to the value added and how many rival lineups he’d crack, not a prediction of the winning bid.</p>
     </Card>
   );
 }
@@ -77,7 +75,7 @@ function FreeAgents({ rows }: { rows: Waivers['freeAgents'] }) {
   return (
     <Card pad={false}>
       <div className="px-4 pt-4 sm:px-5">
-        <CardHeader title="Free agent pool" subtitle="Everyone unrostered in your league, scored your way" right={<Segmented label="Position" value={pos} onChange={setPos} options={['ALL', ...POSITIONS].map(p => ({ value: p, label: p }))} />} />
+        <CardHeader title="Free agent pool" right={<Segmented label="Position" value={pos} onChange={setPos} options={['ALL', ...POSITIONS].map(p => ({ value: p, label: p }))} />} />
       </div>
       {sorted.length === 0 ? <Empty title="No free agents at this position" /> : (
         <div className="max-h-[640px] overflow-auto scroll-thin">

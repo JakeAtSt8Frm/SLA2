@@ -19,7 +19,6 @@ export default function MatchupsPage() {
       <PageHeader
         eyebrow={m.final ? 'Final results' : m.current ? 'This week · live odds' : 'Upcoming'}
         title={`Week ${m.week} matchups`}
-        subtitle={m.final ? 'Final scores with each team’s lineup and bench.' : 'Win odds simulate every starter’s full outcome distribution (including injury risk) 10,000 times.'}
         right={<Select label="Week" value={m.week} onChange={v => setWeek(v === boot.league.week ? null : String(v), true)} options={m.weeks.map(w => ({ value: w, label: `Week ${w}${w === boot.league.week ? ' (current)' : ''}` }))} className="w-44" />}
       />
       {games.length === 0 && <Card><Empty title="No matchups scheduled this week" /></Card>}

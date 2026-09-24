@@ -18,7 +18,6 @@ export default function Hub() {
       <PageHeader
         eyebrow={`${boot.league.season} season · ${week ? `week ${week}` : 'complete'}`}
         title={boot.league.name}
-        subtitle={`${boot.league.totalRosters} teams · ${boot.league.scoringRules} custom scoring rules · ${boot.league.idpSlots} IDP starters · every number uses your league’s settings`}
       />
       {myTeamId !== null && week !== null && <MyMatchup overview={o} />}
       <Standings rows={o.standings} />
@@ -100,7 +99,7 @@ function Standings({ rows }: { rows: Overview['standings'] }) {
   const cut = boot.league.playoffTeams;
   return (
     <Card pad={false}>
-      <div className="px-4 pt-4 sm:px-5"><CardHeader title="Standings" subtitle={`Top ${cut} make the playoffs · odds from 20,000 simulated seasons`} /></div>
+      <div className="px-4 pt-4 sm:px-5"><CardHeader title="Standings" /></div>
       <div className="overflow-x-auto scroll-thin">
         <table className="tbl num text-[13px]">
           <thead>
@@ -139,7 +138,7 @@ function ThisWeek({ games }: { games: Overview['matchups'] }) {
   if (!games.length) return null;
   return (
     <Card>
-      <CardHeader title={`Week ${boot.league.week} matchups`} subtitle="Win odds simulate every starter’s outcome distribution" right={<Button size="sm" variant="ghost" onClick={() => navigate(pathFor(leagueId, 'matchups'))}>All <ArrowRight size={14} /></Button>} />
+      <CardHeader title={`Week ${boot.league.week} matchups`} right={<Button size="sm" variant="ghost" onClick={() => navigate(pathFor(leagueId, 'matchups'))}>All <ArrowRight size={14} /></Button>} />
       <div className="space-y-4">
         {games.map(g => g.b && (
           <button key={g.matchupId ?? g.a.rosterId} onClick={() => navigate(pathFor(leagueId, 'matchups'))} className="block w-full rounded-[10px] text-left hover:bg-surface-2">
@@ -160,7 +159,7 @@ function Awards({ awards }: { awards: Overview['awards'] }) {
   const icon = (key: string) => (key === 'high' || key === 'pf' ? <Flame size={15} /> : key === 'low' ? <Snowflake size={15} /> : key === 'efficiency' ? <Zap size={15} /> : <Trophy size={15} />);
   return (
     <Card>
-      <CardHeader title="Season awards" subtitle="So far this season" />
+      <CardHeader title="Season awards" />
       <div className="grid grid-cols-2 gap-2">
         {awards.map(a => (
           <div key={a.key} className="rounded-[10px] border border-line p-2.5">

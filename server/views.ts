@@ -13,6 +13,7 @@ import { compileScoring, didPlay, hasForecast, round, scoreBreakdown, scoreStats
 import { simulateMatchup, simulateSeason, type TeamWeekDist } from '../engine/simulate.ts';
 import { analyzeTradeSide } from '../engine/trade.ts';
 import { waiverRecommendations } from '../engine/waivers.ts';
+import { buildDefenseIndex, type DefenseRow } from '../engine/defense.ts';
 import { starterSlots } from '../engine/positions.ts';
 import type { Stats } from '../engine/types.ts';
 
@@ -726,4 +727,30 @@ export class HttpError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+// ─── Defense: points allowed by opponent, per position (SLA matchup research) ─
+
+export async function defense(id: string, requestedSeason?: number) {
+  const core = await getCore(id);
+  const seasons = [core.season, core.season - 1];
+  // Early in the year the current season is too thin to rank defenses; default to last season.
+  const defaultSeason = core.lastScored >= 4 ? core.season : core.season - 1;
+  const season = requestedSeason && seasons.includes(requestedSeason) ? requestedSeason : defaultSeason;
+  return once(core, `defense:${season}`, () => {
+    const source = season === core.season ? core.statsByWeek : core.prevStatsByWeek;
+    const lastWeek = season === core.season ? core.lastScored : 18;
+    const weeks = [...source].filter(([w]) => w <= lastWeek).sort((a, b) => a[0] - b[0]).map(([week, lines]) => ({ week, lines: lines.values() }));
+    const index = buildDefenseIndex(weeks, core.players, compileScoring(core.league.scoring));
+    // Who each team plays in the current week, so the table doubles as a matchup finder.
+    const upcoming: Record<string, string> = {};
+    if (core.week !== null) for (const g of core.games.filter(x => x.week === core.week)) { upcoming[g.home] = g.away; upcoming[g.away] = g.home; }
+    return {
+      season, seasons, week: core.week, throughWeek: weeks.at(-1)?.week ?? 0, weeks: weeks.map(w => w.week), upcoming,
+      groups: Object.fromEntries([...index].map(([g, rows]) => [g, rows.map(r => ({
+        ...r, pointsPerGame: r1(r.pointsPerGame), adjustedPerGame: r1(r.adjustedPerGame), last4: r1(r.last4), ceilingRate: pct(r.ceilingRate),
+        floorRate: pct(r.floorRate), top10Rate: pct(r.top10Rate), opportunitiesPerGame: r1(r.opportunitiesPerGame), efficiency: r2(r.efficiency), volatility: r1(r.volatility),
+      }))])) as Record<string, DefenseRow[]>,
+    };
+  });
 }

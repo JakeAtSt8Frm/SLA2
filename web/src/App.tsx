@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeftRight, BarChart3, BookOpen, CalendarDays, ChartNoAxesCombined, FlaskConical, History, LayoutDashboard, ListChecks,
-  Menu, Moon, RefreshCw, ScrollText, Search, Sparkles, Sun, Swords, Trophy, UserPlus, Users, X,
+  ArrowLeftRight, BarChart3, CalendarDays, ChartNoAxesCombined, FlaskConical, History, LayoutDashboard, ListChecks,
+  Menu, Moon, RefreshCw, ScrollText, Search, Shield, Sparkles, Sun, Swords, Trophy, UserPlus, Users, X,
 } from 'lucide-react';
 import { searchLeagues, useBootstrap, type LeagueSearchResult } from './lib/api.ts';
 import { AppProvider, useApp, useTheme } from './lib/context.tsx';
@@ -23,7 +23,7 @@ const pages: Record<Page, ComponentType> = {
   recap: lazy(() => import('./pages/Recap.tsx')),
   history: lazy(() => import('./pages/History.tsx')),
   model: lazy(() => import('./pages/ModelLab.tsx')),
-  scoring: lazy(() => import('./pages/Scoring.tsx')),
+  defense: lazy(() => import('./pages/Defense.tsx')),
   team: lazy(() => import('./pages/Team.tsx')),
   teams: lazy(() => import('./pages/Team.tsx')),
   transactions: lazy(() => import('./pages/Transactions.tsx')),
@@ -46,9 +46,9 @@ const NAV: { group: string; items: { page: Page; label: string; icon: ComponentT
   ] },
   { group: 'Research', items: [
     { page: 'players', label: 'Players', icon: Search },
+    { page: 'defense', label: 'Defense', icon: Shield },
     { page: 'transactions', label: 'Transactions', icon: ScrollText },
     { page: 'model', label: 'Model lab', icon: FlaskConical },
-    { page: 'scoring', label: 'Scoring rules', icon: BookOpen },
   ] },
 ];
 
@@ -91,7 +91,7 @@ function Shell() {
   const Page = pages[route.page] ?? pages.hub;
   useEffect(() => setMenu(false), [route.page, route.param]);
   useEffect(() => {
-    const titles: Partial<Record<Page, string>> = { hub: 'League hub', lineup: 'Start / sit', waivers: 'Waivers', matchups: 'Matchups', power: 'Power rankings', playoffs: 'Playoff odds', players: 'Players', trade: 'Trade lab', recap: 'Season wrapped', history: 'History', model: 'Model lab', scoring: 'Scoring', team: 'Team', transactions: 'Transactions' };
+    const titles: Partial<Record<Page, string>> = { hub: 'League hub', lineup: 'Start / sit', waivers: 'Waivers', matchups: 'Matchups', power: 'Power rankings', playoffs: 'Playoff odds', players: 'Players', trade: 'Trade lab', recap: 'Season wrapped', history: 'History', model: 'Model lab', defense: 'Defense', team: 'Team', transactions: 'Transactions' };
     document.title = `${titles[route.page] ?? 'SLA'} · ${boot.league.name} · SLA 2.0`;
   }, [route.page, boot.league.name]);
   const needsTeam = ['lineup', 'waivers'].includes(route.page) && myTeamId === null;
@@ -104,9 +104,6 @@ function Shell() {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar onMenu={() => setMenu(true)} />
         <main className="mx-auto w-full max-w-[1320px] flex-1 px-4 pb-16 pt-5 sm:px-6 lg:px-8">
-          {boot.warnings.length > 0 && (
-            <div className="mb-4 space-y-2">{boot.warnings.map(w => <div key={w} className="rounded-[10px] border border-line bg-surface-2 px-3 py-2 text-[13px] text-ink-2">{w}</div>)}</div>
-          )}
           <Suspense fallback={<PageSkeleton />}>
             {needsTeam ? <PickTeam /> : <Page key={`${leagueId}:${route.page}:${route.param ?? ''}`} />}
           </Suspense>
