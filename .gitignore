@@ -1,0 +1,13 @@
+node_modules
+dist
+.cache
+research/.venv
+research/cache
+research/dataset*.csv
+research/__pycache__
+data/snapshots
+.DS_Store
+research/predictions_2025.csv
+research/backtest_2025.csv
+research/parity_fixture.csv
+sla/

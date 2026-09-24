@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sla-web",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["node_modules/vite/bin/vite.js"],
+      "port": 5180
+    },
+    {
+      "name": "sla-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--watch-path=server", "--watch-path=engine", "--watch-path=model", "server/index.ts"],
+      "port": 8787
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+node_modules
+dist
+.cache
+data/snapshots
+research/.venv
+research/cache
+research/*.csv
+sla
+.claude
+.DS_Store
