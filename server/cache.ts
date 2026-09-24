@@ -16,6 +16,25 @@ export const HOUR = 60 * MINUTE;
 export interface CacheOptions {
   /** Persist to disk so restarts and research scripts reuse it. */
   disk?: boolean;
+  /**
+   * Stale-while-revalidate: if an expired copy exists (memory or disk), return it immediately
+   * and refresh in the background. Keeps cold starts on slow hosts fast.
+   */
+  swr?: boolean;
+}
+
+const refreshing = new Map<string, Promise<void>>();
+
+function refreshInBackground<T>(key: string, ttl: number, load: () => Promise<T>, disk: boolean) {
+  if (refreshing.has(key)) return;
+  const task = load()
+    .then(async value => {
+      remember(key, value, ttl);
+      if (disk) await writeDisk(key, value);
+    })
+    .catch(error => console.warn(`[cache] background refresh failed for ${key}:`, (error as Error).message))
+    .finally(() => refreshing.delete(key));
+  refreshing.set(key, task);
 }
 
 const fileFor = (key: string) => path.join(CACHE_DIR, `${key.replace(/[^a-zA-Z0-9._-]+/g, '_')}.json.gz`);
@@ -62,6 +81,13 @@ export async function cached<T>(key: string, ttl: number, load: () => Promise<T>
   const pending = inflight.get(key);
   if (pending) return pending as Promise<T>;
 
+  if (options.swr && hit) {
+    // Keep serving the expired copy briefly while one refresh runs.
+    remember(key, hit.value, 30_000, hit.storedAt);
+    refreshInBackground(key, ttl, load, !!options.disk);
+    return hit.value as T;
+  }
+
   const task = (async () => {
     let stale: unknown = hit?.value;
     if (options.disk) {
@@ -69,6 +95,11 @@ export async function cached<T>(key: string, ttl: number, load: () => Promise<T>
       if (disk) {
         if (disk.mtime + ttl > Date.now()) {
           remember(key, disk.value, ttl, disk.mtime);
+          return disk.value as T;
+        }
+        if (options.swr) {
+          remember(key, disk.value, 30_000, disk.mtime);
+          refreshInBackground(key, ttl, load, true);
           return disk.value as T;
         }
         stale ??= disk.value;

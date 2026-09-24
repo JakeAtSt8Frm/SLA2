@@ -241,7 +241,8 @@ async function buildCore(id: string): Promise<LeagueCore> {
 const cores = new Map<string, { core: LeagueCore; at: number }>();
 const rebuilding = new Map<string, Promise<LeagueCore>>();
 const FRESH = 1.5 * MINUTE;
-const USABLE = 15 * MINUTE;
+/** An older core is still shown instantly (with its timestamp) while a fresh one builds. */
+const USABLE = 12 * 60 * MINUTE;
 
 function rebuild(id: string): Promise<LeagueCore> {
   let p = rebuilding.get(id);
@@ -257,7 +258,7 @@ function rebuild(id: string): Promise<LeagueCore> {
 }
 
 /**
- * Stale-while-revalidate: a core younger than 90 s is served as is; an older one (up to 15 min)
+ * Stale-while-revalidate: a core younger than 90 s is served as is; an older one (up to 12 h)
  * is served instantly while a fresh build runs in the background. Live games stay within ~90 s.
  */
 export function getCore(id: string): Promise<LeagueCore> {

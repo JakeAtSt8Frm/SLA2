@@ -295,7 +295,7 @@ export const sleeper = {
   losersBracket: (id: string, final = false) => cached(`lb:${id}`, final ? FOREVER : 10 * MINUTE, async () => parseBracket(await sleeperJson(`/v1/league/${id}/losers_bracket`)), { disk: final }),
   trending: (type: 'add' | 'drop') => cached(`trending:${type}`, 15 * MINUTE, async () =>
     arr(await sleeperJson(`/v1/players/nfl/trending/${type}?lookback_hours=48&limit=100`)).map(x => ({ id: str(obj(x).player_id) ?? '', count: num(obj(x).count) }))),
-  players: () => cached('players', 12 * HOUR, loadPlayers, { disk: true }),
+  players: () => cached('players', 12 * HOUR, loadPlayers, { disk: true, swr: true }),
 };
 
 // ─── Players ─────────────────────────────────────────────────────────────────
@@ -372,12 +372,12 @@ function statsTtl(f: WeekFreshness): number {
 
 export function weekStats(f: WeekFreshness): Promise<WeekLine[]> {
   const ttl = statsTtl(f);
-  return cached(`stats:${f.season}:${f.week}`, ttl, async () => parseWeekLines(await sleeperJson(`/stats/nfl/${f.season}/${f.week}?season_type=regular`)), { disk: true });
+  return cached(`stats:${f.season}:${f.week}`, ttl, async () => parseWeekLines(await sleeperJson(`/stats/nfl/${f.season}/${f.week}?season_type=regular`)), { disk: true, swr: ttl !== FOREVER });
 }
 
 export function weekProjections(f: WeekFreshness): Promise<WeekLine[]> {
   const ttl = f.season < f.currentSeason || f.week < f.currentWeek ? FOREVER : 20 * MINUTE;
-  return cached(`proj:${f.season}:${f.week}`, ttl, async () => parseWeekLines(await sleeperJson(`/projections/nfl/${f.season}/${f.week}?season_type=regular`)), { disk: true });
+  return cached(`proj:${f.season}:${f.week}`, ttl, async () => parseWeekLines(await sleeperJson(`/projections/nfl/${f.season}/${f.week}?season_type=regular`)), { disk: true, swr: ttl !== FOREVER });
 }
 
 // ─── NFL schedule (nflverse: kickoff times and betting lines) ────────────────
@@ -424,7 +424,7 @@ export function parseGames(text: string): NflGame[] {
   }));
 }
 
-export const nflGames = () => cached('nflverse:games', 3 * HOUR, async () => parseGames(await fetchText(NFLVERSE_GAMES)), { disk: true });
+export const nflGames = () => cached('nflverse:games', 3 * HOUR, async () => parseGames(await fetchText(NFLVERSE_GAMES)), { disk: true, swr: true });
 
 /** Sleeper's live game status (pre_game / in_game / complete) for lock detection. */
 export const sleeperSchedule = (season: number) => cached(`schedule:${season}`, 5 * MINUTE, async () =>
