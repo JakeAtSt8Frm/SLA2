@@ -38,7 +38,7 @@ export default function DefensePage() {
     const rank = allWeekly.findIndex(x => x >= v);
     return Math.min(6, Math.floor(((rank < 0 ? allWeekly.length : rank) / Math.max(1, allWeekly.length)) * 7));
   };
-  const mine = (players.data?.players ?? []).filter(p => p.owner === myTeamId && p.pos === group && p.team && d.upcoming[p.team]);
+  const mine = (players.data?.players ?? []).filter(p => myTeamId !== null && p.owner === myTeamId && p.pos === group && p.team && d.upcoming[p.team]);
   return (
     <div className="space-y-5">
       <PageHeader

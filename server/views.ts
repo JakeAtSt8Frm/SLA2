@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { memo, HOUR } from './cache.ts';
-import { getCore, MODEL_DIR, playoffShape, type LeagueCore } from './league.ts';
+import { getCore, MODEL_DIR, onCoreBuilt, playoffShape, type LeagueCore } from './league.ts';
 import { sleeper, type SleeperMatchup } from './sleeper.ts';
 import { explainInputs, outcomeOf, type WeekForecast } from '../engine/forecast.ts';
 import { exceedProbability, normalCdf } from '../engine/distribution.ts';
@@ -18,6 +18,7 @@ import { starterSlots } from '../engine/positions.ts';
 import type { Stats } from '../engine/types.ts';
 
 const r1 = (n: number) => round(n, 1);
+const SEASON_SIMS = 12000;
 const r2 = (n: number) => round(n, 2);
 const pct = (n: number) => round(n, 4);
 
@@ -31,7 +32,8 @@ function once<T>(core: LeagueCore, key: string, compute: () => T): T {
   return bag.get(key) as T;
 }
 
-interface SeasonLine { gp: number; total: number; ppg: number; last3: number; snap: number | null; weeks: { week: number; pts: number }[] }
+interface RankInfo { rank: number; outOf: number }
+interface SeasonLine { gp: number; total: number; ppg: number; last3: number; snap: number | null; weeks: { week: number; pts: number }[]; totalRank: RankInfo | null; ppgRank: RankInfo | null }
 function seasonLines(core: LeagueCore): Map<string, SeasonLine> {
   return once(core, 'seasonLines', () => {
     const scoring = compileScoring(core.league.scoring);
@@ -41,7 +43,7 @@ function seasonLines(core: LeagueCore): Map<string, SeasonLine> {
       if (!lines) continue;
       for (const [id, line] of lines) {
         if (!didPlay(line.stats) || !core.players[id]) continue;
-        const s = out.get(id) ?? { gp: 0, total: 0, ppg: 0, last3: 0, snap: null, weeks: [] };
+        const s = out.get(id) ?? { gp: 0, total: 0, ppg: 0, last3: 0, snap: null, weeks: [], totalRank: null, ppgRank: null };
         s.gp++;
         const pts = scoreStats(line.stats, scoring);
         s.total += pts;
@@ -61,6 +63,22 @@ function seasonLines(core: LeagueCore): Map<string, SeasonLine> {
         return snaps && team ? snaps / team : null;
       }).filter((v): v is number => v !== null);
       s.snap = shares.length ? shares.reduce((a, b) => a + b, 0) / shares.length : null;
+    }
+    // SLA 1.0 position ranks: Total among everyone who scored; PPG needs a minimum number of games
+    // (min(6, max(3, 55% of weeks played))), capped at the weeks played so early-season ranks exist.
+    const minGames = Math.min(core.lastScored, Math.min(6, Math.max(3, Math.floor(core.lastScored * 0.55))));
+    const byPos = new Map<string, [string, SeasonLine][]>();
+    for (const [id, s] of out) {
+      const pos = core.players[id]?.pos;
+      if (!pos) continue;
+      if (!byPos.has(pos)) byPos.set(pos, []);
+      byPos.get(pos)!.push([id, s]);
+    }
+    for (const list of byPos.values()) {
+      const byTotal = list.filter(([, s]) => s.total > 0).sort((a, b) => b[1].total - a[1].total);
+      byTotal.forEach(([, s], i) => { s.totalRank = { rank: i + 1, outOf: byTotal.length }; });
+      const byPpg = list.filter(([, s]) => s.gp >= Math.max(1, minGames)).sort((a, b) => b[1].ppg - a[1].ppg);
+      byPpg.forEach(([, s], i) => { s.ppgRank = { rank: i + 1, outOf: byPpg.length }; });
     }
     return out;
   });
@@ -90,6 +108,7 @@ function playerRow(core: LeagueCore, id: string) {
     week: week !== null ? forecastView(core.forecasts.get(week)?.get(id)) : null,
     value: v ? { value: r1(v.value), dynasty: r1(v.dynasty), vorp: r2(v.vorp), rosAvg: r2(v.rosAvg), rosTotal: r1(v.rosTotal), posRank: v.posRank, rank: v.overallRank, tier: v.tier } : null,
     season: s ? { gp: s.gp, total: r1(s.total), ppg: r2(s.ppg), last3: r2(s.last3), snap: s.snap === null ? null : pct(s.snap), weeks: s.weeks.map(x => [x.week, r1(x.pts)]) } : null,
+    ranks: { total: s?.totalRank ?? null, ppg: s?.ppgRank ?? null },
     trending: core.trending.get(id) ?? 0,
   };
 }
@@ -136,7 +155,7 @@ function seasonSim(core: LeagueCore) {
       finalWeeks: shape.finalWeeks,
       leverageWeek: core.week ?? 0,
       seed: `${core.id}:${core.week}`,
-      sims: 20000,
+      sims: SEASON_SIMS,
     });
   });
 }
@@ -263,7 +282,7 @@ export async function matchups(id: string, requestedWeek?: number) {
     if (b && forecasts && !isPast) {
       if (isCurrent) {
         const outcomes = (m: SleeperMatchup) => m.starters.filter(s => s !== '0').map(pid => forecasts.get(pid)).filter((f): f is WeekForecast => !!f).map(outcomeOf);
-        sim10 = simulateMatchup(outcomes(a), outcomes(b), `${id}:${week}:${a.rosterId}:${b.rosterId}`);
+        sim10 = simulateMatchup(outcomes(a), outcomes(b), `${id}:${week}:${a.rosterId}:${b.rosterId}`, 8000);
         winProb = sim10.winProbA;
       } else {
         const key1 = `${week}:${a.rosterId}:${b.rosterId}`, key2 = `${week}:${b.rosterId}:${a.rosterId}`;
@@ -396,6 +415,7 @@ export async function waivers(id: string, rosterId: number) {
     const freeAgents = core.relevant.filter(pid => !rostered.has(pid) && core.players[pid]?.team);
     const recs = waiverRecommendations({
       roster: active,
+      starters: core.advice.get(rosterId)?.current.ids.map(x => x ?? '') ?? t.roster.starters,
       rosterLimit: core.slots.length + benchSlots,
       slots: core.slots,
       players: core.players,
@@ -436,7 +456,7 @@ export async function playoffs(id: string) {
     playoffTeams: core.league.playoffTeams,
     playoffWeekStart: core.league.playoffWeekStart,
     lastRegularWeek: core.lastRegularWeek,
-    sims: 20000,
+    sims: SEASON_SIMS,
     teams: sim.teams.map(o => ({
       ...teamView(core, o.rosterId), ...o,
       playoffPct: pct(o.playoffPct), byePct: pct(o.byePct), firstSeedPct: pct(o.firstSeedPct), finalPct: pct(o.finalPct), champPct: pct(o.champPct), lastPct: pct(o.lastPct),
@@ -571,7 +591,7 @@ export async function trade(id: string, body: { a: number; b: number; aGives: st
       remaining,
       dist: (rid, w) => override.get(`${rid}:${w}`) ?? teamDist(core, rid, w),
       playoffTeams: core.league.playoffTeams, playoffStart: core.league.playoffWeekStart, roundWeeks: shape.roundWeeks, finalWeeks: shape.finalWeeks,
-      leverageWeek: core.week ?? 0, seed: `${core.id}:${core.week}`, sims: 20000,
+      leverageWeek: core.week ?? 0, seed: `${core.id}:${core.week}`, sims: SEASON_SIMS,
     });
   })();
   const odds = (sim: typeof before, rid: number) => {
@@ -731,13 +751,13 @@ export class HttpError extends Error {
 
 // ─── Defense: points allowed by opponent, per position (SLA matchup research) ─
 
-export async function defense(id: string, requestedSeason?: number) {
+export async function defense(id: string, requestedSeason?: number): Promise<DefenseView> {
   const core = await getCore(id);
   const seasons = [core.season, core.season - 1];
   // Early in the year the current season is too thin to rank defenses; default to last season.
   const defaultSeason = core.lastScored >= 4 ? core.season : core.season - 1;
   const season = requestedSeason && seasons.includes(requestedSeason) ? requestedSeason : defaultSeason;
-  return once(core, `defense:${season}`, () => {
+  const compute = (): DefenseView => {
     const source = season === core.season ? core.statsByWeek : core.prevStatsByWeek;
     const lastWeek = season === core.season ? core.lastScored : 18;
     const weeks = [...source].filter(([w]) => w <= lastWeek).sort((a, b) => a[0] - b[0]).map(([week, lines]) => ({ week, lines: lines.values() }));
@@ -752,5 +772,30 @@ export async function defense(id: string, requestedSeason?: number) {
         floorRate: pct(r.floorRate), top10Rate: pct(r.top10Rate), opportunitiesPerGame: r1(r.opportunitiesPerGame), efficiency: r2(r.efficiency), volatility: r1(r.volatility),
       }))])) as Record<string, DefenseRow[]>,
     };
-  });
+  };
+  if (season === core.season) return once(core, `defense:${season}`, compute);
+  const key = `${id}:${season}`;
+  let cachedPrev = pastDefense.get(key);
+  if (!cachedPrev) { cachedPrev = compute(); pastDefense.set(key, cachedPrev); }
+  // The "this week" opponents still come from the live schedule.
+  const upcoming: Record<string, string> = {};
+  if (core.week !== null) for (const g of core.games.filter(x => x.week === core.week)) { upcoming[g.home] = g.away; upcoming[g.away] = g.home; }
+  return { ...cachedPrev, week: core.week, upcoming };
 }
+interface DefenseView { season: number; seasons: number[]; week: number | null; throughWeek: number; weeks: number[]; upcoming: Record<string, string>; groups: Record<string, DefenseRow[]> }
+/** Past seasons never change, so their tables are shared across core rebuilds. */
+const pastDefense = new Map<string, DefenseView>();
+
+/**
+ * After each rebuild, precompute the heaviest shared views one at a time (yielding between
+ * them) so the first visitor doesn't pay for them on a slow CPU.
+ */
+onCoreBuilt(core => {
+  const id = core.id;
+  void (async () => {
+    for (const view of [() => overview(id), () => players(id), () => powerView(id), () => playoffs(id), () => defense(id)]) {
+      try { await view(); } catch { /* best effort */ }
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+  })();
+});

@@ -3,7 +3,7 @@ import { ArrowRight, TrendingUp } from 'lucide-react';
 import { useWaivers, type Waivers } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { fmt, pct, POSITIONS } from '../lib/format.ts';
-import { Button, Card, CardHeader, Empty, ErrorState, InfoTip, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Segmented, Stat, useSort } from '../components/ui.tsx';
+import { Button, Card, CardHeader, Empty, ErrorState, InfoTip, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Segmented, Stat, useSort } from '../components/ui.tsx';
 import { Sparkline } from '../charts/charts.tsx';
 
 export default function WaiversPage() {
@@ -44,7 +44,7 @@ function Recommendations({ recs }: { recs: Waivers['recommendations'] }) {
           <div key={r.id} className="grid gap-3 rounded-[12px] border border-line p-3.5 md:grid-cols-[28px_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)] md:items-center">
             <div className="num text-[15px] font-semibold text-ink-3">{i + 1}</div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2"><span className="text-[11px] font-semibold uppercase tracking-wide text-good-ink">Add</span><Pos pos={r.player.pos} /><PlayerLink id={r.id} name={r.player.name} /><span className="text-[12px] text-ink-3">{r.player.team}</span><Injury status={r.player.injury} /></div>
+              <div className="flex items-center gap-2"><span className="text-[11px] font-semibold uppercase tracking-wide text-good-ink">Add</span><Pos pos={r.player.pos} /><PlayerLink id={r.id} name={r.player.name} /><span className="text-[12px] text-ink-3">{r.player.team}</span><Ranks ranks={r.player.ranks} /><Injury status={r.player.injury} /></div>
               {r.drop ? (
                 <div className="mt-1 flex items-center gap-2 text-ink-2"><span className="text-[11px] font-semibold uppercase tracking-wide text-bad-ink">Drop</span><Pos pos={r.drop.pos} /><PlayerLink id={r.drop.id} name={r.drop.name} className="font-normal text-ink-2" /><span className="num text-[12px] text-ink-3">{r.dropCost < 0.1 ? 'no lineup impact' : `costs ${fmt(r.dropCost)} pts`}</span></div>
               ) : <div className="mt-1 text-[12px] text-ink-3">Open roster spot, no drop needed</div>}
@@ -95,7 +95,7 @@ function FreeAgents({ rows }: { rows: Waivers['freeAgents'] }) {
             <tbody>
               {sorted.slice(0, 120).map(r => (
                 <tr key={r.id} className="row-hover">
-                  <td><span className="flex items-center gap-2"><Pos pos={r.pos} /><PlayerLink id={r.id} name={r.name} className="max-w-[180px]" /><span className="text-[11px] text-ink-3">{r.team}</span><Injury status={r.injury} /></span></td>
+                  <td><span className="flex items-center gap-2"><Pos pos={r.pos} /><PlayerLink id={r.id} name={r.name} className="max-w-[180px]" /><span className="text-[11px] text-ink-3">{r.team}</span><Ranks ranks={r.ranks} /><Injury status={r.injury} /></span></td>
                   <td className="r font-semibold">{r.week ? (r.week.bye ? 'BYE' : fmt(r.week.exp)) : '—'}</td>
                   <td className="r">{fmt(r.value?.rosAvg)}</td>
                   <td className="r text-ink-2">{fmt(r.season?.ppg)}</td>

@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, type QueryClient } from '@tanstack/react-query';
 // Type-only: the server's view functions define the API contract end to end.
 import type * as V from '../../../server/views.ts';
 
@@ -45,6 +45,27 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 const base = (id: string) => `/api/leagues/${id}`;
 const MIN = 60_000;
+
+/** Warm the pages people open most, so switching tabs is instant. */
+export function prefetchCore(client: QueryClient, id: string, rosterId: number | null) {
+  const jobs: [unknown[], string][] = [
+    [['overview', id], `${base(id)}/overview`],
+    [['matchups', id, 'current'], `${base(id)}/matchups`],
+    [['players', id], `${base(id)}/players`],
+    [['power', id], `${base(id)}/power`],
+    [['playoffs', id], `${base(id)}/playoffs`],
+  ];
+  if (rosterId !== null) {
+    jobs.unshift([['lineup', id, rosterId], `${base(id)}/teams/${rosterId}/lineup`]);
+    jobs.push([['team', id, rosterId], `${base(id)}/teams/${rosterId}`], [['waivers', id, rosterId], `${base(id)}/teams/${rosterId}/waivers`]);
+  }
+  // Sequential: a small server CPU answers one at a time anyway.
+  void (async () => {
+    for (const [queryKey, url] of jobs) {
+      await client.prefetchQuery({ queryKey, queryFn: () => request(url), staleTime: MIN }).catch(() => undefined);
+    }
+  })();
+}
 
 export const useBootstrap = (id: string) => useQuery({ queryKey: ['bootstrap', id], queryFn: () => request<Bootstrap>(`${base(id)}/bootstrap`), staleTime: MIN, refetchInterval: 2 * MIN });
 export const useOverview = (id: string) => useQuery({ queryKey: ['overview', id], queryFn: () => request<Overview>(`${base(id)}/overview`), staleTime: MIN, refetchInterval: 2 * MIN });

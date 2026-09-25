@@ -345,7 +345,15 @@ async function loadPlayers(): Promise<Record<string, PlayerInfo>> {
 
 // ─── Weekly stats & projections ──────────────────────────────────────────────
 
-export interface WeekLine { id: string; team: string | null; opponent: string | null; gameId: string | null; stats: Stats }
+export interface WeekLine {
+  id: string;
+  team: string | null;
+  opponent: string | null;
+  gameId: string | null;
+  stats: Stats;
+  /** Injury tag embedded in the row (fresher than the daily player catalogue), with its news time. */
+  injury?: { status: string | null; at: number | null };
+}
 
 function parseWeekLines(value: unknown): WeekLine[] {
   const out: WeekLine[] = [];
@@ -355,9 +363,24 @@ function parseWeekLines(value: unknown): WeekLine[] {
     if (!id) continue;
     const stats = cleanStats(row.stats);
     if (!Object.keys(stats).length) continue;
-    out.push({ id, team: normalizeTeam(str(row.team)), opponent: normalizeTeam(str(row.opponent)), gameId: str(row.game_id), stats });
+    const player = row.player ? obj(row.player) : null;
+    const line: WeekLine = { id, team: normalizeTeam(str(row.team)), opponent: normalizeTeam(str(row.opponent)), gameId: str(row.game_id), stats };
+    if (player) line.injury = { status: str(player.injury_status), at: numOrNull(player.news_updated) };
+    out.push(line);
   }
   return out;
+}
+
+/** Cheap content signature so unchanged refreshes don't trigger recomputation. */
+export function linesSignature(lines: readonly WeekLine[]): number {
+  let h = lines.length | 0;
+  for (const l of lines) {
+    for (let i = 0; i < l.id.length; i++) h = (Math.imul(h, 31) + l.id.charCodeAt(i)) | 0;
+    for (const k in l.stats) h = (Math.imul(h, 31) + Math.round(l.stats[k] * 100)) | 0;
+    const inj = l.injury?.status;
+    if (inj) for (let i = 0; i < inj.length; i++) h = (Math.imul(h, 31) + inj.charCodeAt(i)) | 0;
+  }
+  return h >>> 0;
 }
 
 export interface WeekFreshness { season: number; week: number; currentSeason: number; currentWeek: number }

@@ -4,7 +4,7 @@ import { useApp } from '../lib/context.tsx';
 import { fmt, kickoff, pct, prob, signed, FEATURE_LABELS } from '../lib/format.ts';
 import { useSearchParam } from '../lib/router.ts';
 import { HBars, RangeBar, Sparkline, useWidth } from '../charts/charts.tsx';
-import { Card, Delta, Empty, Injury, Pos, Skeleton, TeamLink, useEscape, cx } from './ui.tsx';
+import { Card, Delta, Empty, Injury, Pos, Ranks, Skeleton, TeamLink, useEscape, cx } from './ui.tsx';
 
 /** Short, human reading of a model input. */
 function describe(key: string, v: number | null): string | null {
@@ -37,7 +37,7 @@ export function PlayerDrawer() {
   const { leagueId, boot } = useApp();
   const q = usePlayer(leagueId, pid);
   const close = () => setPid(null, true);
-  useEscape(close, !!pid);
+  const dialog = useEscape(close, !!pid);
   if (!pid) return null;
   const d = q.data;
   const p = d?.player;
@@ -45,13 +45,14 @@ export function PlayerDrawer() {
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={p ? p.name : 'Player'}>
       <div className="absolute inset-0 bg-[var(--overlay)] fade-in" onClick={close} aria-hidden />
-      <div className="slide-in relative flex h-full w-full max-w-[640px] flex-col overflow-hidden border-l border-line bg-page shadow-2xl">
+      <div ref={dialog} tabIndex={-1} className="slide-in relative flex h-full w-full max-w-[640px] flex-col overflow-hidden border-l border-line bg-page shadow-2xl">
         <div className="flex items-start gap-3 border-b border-line bg-surface px-5 py-4">
           {q.isPending || !p ? <Skeleton className="h-12 w-60" /> : (
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <Pos pos={p.pos} />
                 <h2 className="truncate text-[20px] font-semibold tracking-tight">{p.name}</h2>
+                <Ranks ranks={p.ranks} />
                 <Injury status={p.injury} />
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-ink-2">

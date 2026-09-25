@@ -5,7 +5,7 @@ import { useApp } from '../lib/context.tsx';
 import { ago, fmt, ordinal, POSITIONS, prob, record, teamColor } from '../lib/format.ts';
 import { navigate, pathFor, useRoute } from '../lib/router.ts';
 import { WeekColumns, WinBar } from '../charts/charts.tsx';
-import { Button, Card, CardHeader, Delta, Empty, ErrorState, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Select, Stat, TeamAvatar, TeamLink, cx } from '../components/ui.tsx';
+import { Button, Card, CardHeader, Delta, Empty, ErrorState, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Select, Stat, TeamAvatar, TeamLink, cx } from '../components/ui.tsx';
 
 export default function TeamRoute() {
   const route = useRoute();
@@ -99,7 +99,7 @@ function TeamView({ t }: { t: TeamPage }) {
                 <tbody>
                   {g.players.map(r => (
                     <tr key={r.id} className="row-hover">
-                      <td className="w-[40%]"><span className="flex items-center gap-2"><PlayerLink id={r.id} name={r.name} className="max-w-[200px]" /><span className="text-[11px] text-ink-3">{r.team ?? 'FA'}</span><Injury status={r.injury} /></span></td>
+                      <td className="w-[40%]"><span className="flex items-center gap-2"><PlayerLink id={r.id} name={r.name} className="max-w-[200px]" /><span className="text-[11px] text-ink-3">{r.team ?? 'FA'}</span><Ranks ranks={r.ranks} /><Injury status={r.injury} /></span></td>
                       <td className="text-[11px] font-semibold text-ink-3">{r.slot === 'START' ? 'Starter' : r.slot === 'BN' ? 'Bench' : r.slot}</td>
                       <td className="r"><span className="text-ink-3">wk </span>{r.week ? (r.week.bye ? 'BYE' : fmt(r.week.exp)) : '—'}</td>
                       <td className="r"><span className="text-ink-3">ros </span>{fmt(r.value?.rosAvg)}</td>

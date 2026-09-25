@@ -28,8 +28,9 @@ export function simulateMatchup(a: readonly Outcome[], b: readonly Outcome[], se
     for (const v of arr) out[Math.min(bins - 1, Math.max(0, Math.floor((v - lo) / width)))]++;
     return out.map(c => c / arr.length);
   };
-  const lo = Math.min(q(totalsA, 0.005), q(totalsB, 0.005));
-  const hi = Math.max(q(totalsA, 0.995), q(totalsB, 0.995));
+  let lo = Math.min(q(totalsA, 0.005), q(totalsB, 0.005));
+  let hi = Math.max(q(totalsA, 0.995), q(totalsB, 0.995));
+  if (!(hi - lo > 1e-6)) { lo -= 1; hi += 1; }
   return {
     winProbA: winsA / n,
     a: { p10: q(totalsA, 0.1), p50: q(totalsA, 0.5), p90: q(totalsA, 0.9) },
@@ -81,7 +82,7 @@ export function simulateSeason(input: SeasonSimInput): { teams: TeamSeasonOutloo
   const rand = mulberry32(hashSeed(input.seed ?? 'season'));
   const T = input.teams.length;
   const idx = new Map(input.teams.map((id, i) => [id, i]));
-  const hasByes = input.playoffTeams === 6 || input.playoffTeams === 3;
+  const byeCount = input.playoffTeams > 1 ? 2 ** Math.ceil(Math.log2(input.playoffTeams)) - input.playoffTeams : 0;
   const counters = input.teams.map(() => ({
     playoff: 0, bye: 0, first: 0, final: 0, champ: 0, last: 0, wins: 0, losses: 0, pf: 0,
     seed: new Array(T).fill(0), winsHist: new Array(20).fill(0), ifWin: [0, 0], ifLose: [0, 0],
@@ -116,9 +117,14 @@ export function simulateSeason(input: SeasonSimInput): { teams: TeamSeasonOutloo
       const sa = draw(g.a, g.week), sb = draw(g.b, g.week);
       pf[ia] += sa;
       pf[ib] += sb;
+      const key = `${g.week}:${g.a}:${g.b}`;
+      if (sa === sb) {
+        wins[ia] += 0.5; wins[ib] += 0.5; losses[ia] += 0.5; losses[ib] += 0.5;
+        gameWins.set(key, (gameWins.get(key) ?? 0) + 0.5);
+        continue;
+      }
       const aWins = sa > sb;
       if (aWins) { wins[ia]++; losses[ib]++; } else { wins[ib]++; losses[ia]++; }
-      const key = `${g.week}:${g.a}:${g.b}`;
       gameWins.set(key, (gameWins.get(key) ?? 0) + (aWins ? 1 : 0));
       if (g.week === input.leverageWeek) {
         leverageResult[ia] = aWins ? 1 : -1;
@@ -137,7 +143,7 @@ export function simulateSeason(input: SeasonSimInput): { teams: TeamSeasonOutloo
       const inPlayoffs = rank < input.playoffTeams;
       if (inPlayoffs) c.playoff++;
       if (rank === 0) c.first++;
-      if (hasByes && rank < 2) c.bye++;
+      if (rank < byeCount) c.bye++;
       if (rank === T - 1) c.last++;
       if (leverageResult[i] === 1) { c.ifWin[0]++; if (inPlayoffs) c.ifWin[1]++; }
       if (leverageResult[i] === -1) { c.ifLose[0]++; if (inPlayoffs) c.ifLose[1]++; }
@@ -173,35 +179,42 @@ export function simulateSeason(input: SeasonSimInput): { teams: TeamSeasonOutloo
   };
 }
 
-/** Fixed (no-reseed) bracket as Sleeper builds it for 2/4/6/8 teams. */
+/** Standard bracket order for a power-of-two field: 1v8, 4v5, 2v7, 3v6, … */
+function bracketOrder(size: number): number[] {
+  let order = [1];
+  while (order.length < size) {
+    const n = order.length * 2;
+    order = order.flatMap(seed => [seed, n + 1 - seed]);
+  }
+  return order;
+}
+
+/**
+ * Fixed (no-reseed) single elimination, as Sleeper runs it. Seeds beyond the field are byes, so
+ * 6 teams play 3v6 and 4v5 while 1 and 2 wait, and 3 teams give only the top seed a bye.
+ */
 function playBracket(seeds: number[], input: SeasonSimInput, draw: (id: number, week: number) => number): { finalists: number[]; champion: number | null } {
   if (seeds.length < 2) return { finalists: seeds, champion: seeds[0] ?? null };
+  const size = 2 ** Math.ceil(Math.log2(seeds.length));
+  let field: (number | null)[] = bracketOrder(size).map(seed => seeds[seed - 1] ?? null);
   let week = input.playoffStart;
-  const game = (a: number, b: number, weeks: number) => {
-    let sa = 0, sb = 0;
-    for (let w = 0; w < weeks; w++) { sa += draw(a, week + w); sb += draw(b, week + w); }
-    return sa >= sb ? a : b;
-  };
-  const round = (pairs: [number, number][], isFinal: boolean) => {
-    const weeks = isFinal ? input.finalWeeks : input.roundWeeks;
-    const winners = pairs.map(([a, b]) => game(a, b, weeks));
-    week += weeks;
-    return winners;
-  };
-  const s = seeds;
-  let alive: number[];
-  if (s.length === 2) alive = s;
-  else if (s.length === 3) alive = [s[0], ...round([[s[1], s[2]]], false)];
-  else if (s.length === 4) alive = round([[s[0], s[3]], [s[1], s[2]]], false);
-  else if (s.length === 6) {
-    const [w45, w36] = round([[s[3], s[4]], [s[2], s[5]]], false);
-    alive = round([[s[0], w45], [s[1], w36]], false);
-  } else if (s.length === 8) {
-    const r1 = round([[s[0], s[7]], [s[3], s[4]], [s[1], s[6]], [s[2], s[5]]], false);
-    alive = round([[r1[0], r1[1]], [r1[2], r1[3]]], false);
-  } else {
-    alive = s.slice(0, 2);
+  while (field.length > 2) {
+    const next: (number | null)[] = [];
+    let played = false;
+    for (let i = 0; i < field.length; i += 2) {
+      const a = field[i], b = field[i + 1];
+      if (a === null || b === null) { next.push(a ?? b); continue; }
+      played = true;
+      let sa = 0, sb = 0;
+      for (let w = 0; w < input.roundWeeks; w++) { sa += draw(a, week + w); sb += draw(b, week + w); }
+      next.push(sa >= sb ? a : b);
+    }
+    if (played) week += input.roundWeeks;
+    field = next;
   }
-  const champion = round([[alive[0], alive[1]]], true)[0];
-  return { finalists: alive, champion };
+  const [a, b] = field;
+  if (a === null || b === null) return { finalists: [a, b].filter((x): x is number => x !== null), champion: a ?? b };
+  let sa = 0, sb = 0;
+  for (let w = 0; w < input.finalWeeks; w++) { sa += draw(a, week + w); sb += draw(b, week + w); }
+  return { finalists: [a, b], champion: sa >= sb ? a : b };
 }

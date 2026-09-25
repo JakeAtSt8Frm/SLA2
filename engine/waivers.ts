@@ -27,6 +27,8 @@ export interface WaiverRecommendation {
 
 interface Args {
   roster: readonly string[];
+  /** Current starters in slot order (empty string / missing = empty slot). Needed for kickoff locks. */
+  starters?: readonly string[];
   rosterLimit: number;
   slots: readonly string[];
   players: Record<string, PlayerInfo>;
@@ -50,43 +52,59 @@ const DYNASTY_KEEP_WEIGHT = 0.9;
 
 export function waiverRecommendations(a: Args): WaiverRecommendation[] {
   const weight = (w: number) => DISCOUNT ** Math.max(0, w - a.currentWeek);
-  const best = (ids: readonly string[], week: number): number => {
+  const starters = a.starters ?? [];
+
+  /**
+   * Best legal lineup from `ids` in `week`. In the current week a started player stays in the slot
+   * he occupies and a player whose game has kicked off cannot be moved in.
+   */
+  const lineup = (ids: readonly string[], week: number) => {
     const f = a.forecasts.get(week);
-    if (!f) return 0;
+    if (!f) return { total: 0, ids: [] as (string | null)[] };
+    const current = week === a.currentWeek;
+    const members = new Set(ids);
+    const locked = new Map<number, string | null>();
+    if (current) starters.forEach((id, i) => { if (id && members.has(id) && a.isLocked(id)) locked.set(i, id); });
+    const lockedIds = new Set(locked.values());
     const pool: LineupCandidate[] = [];
-    for (const id of ids) {
+    for (const id of members) {
       const p = a.players[id], fc = f.get(id);
       if (!p || !fc) continue;
-      if (week === a.currentWeek && a.isLocked(id)) continue;
+      if (current && a.isLocked(id) && !lockedIds.has(id)) continue;
       pool.push({ id, eligible: p.eligible, value: fc.expected });
     }
-    return optimizeLineup(a.slots, pool).total;
+    return optimizeLineup(a.slots, pool, locked);
   };
-  const base = new Map(a.weeks.map(w => [w, best(a.roster, w)]));
+  const best = (ids: readonly string[], week: number) => lineup(ids, week).total;
+  const baseLineups = new Map(a.weeks.map(w => [w, lineup(a.roster, w)]));
+  const base = new Map([...baseLineups].map(([w, l]) => [w, l.total]));
 
-  // Cheap upper bound to prune: can he beat the weakest starter he could replace?
-  const weakest = new Map<number, Map<string, number>>();
-  for (const w of a.weeks) {
+  /*
+   * Pruning bound. Lineups are bases of a transversal matroid, so adding one player can raise the
+   * optimum by at most (his value − the weakest movable starter), or by his whole value when a slot
+   * is empty. The bound is exact enough to skip hundreds of free agents without missing a pickup
+   * that helps by pushing a dual-eligible starter into another slot.
+   */
+  const floorByWeek = new Map<number, number>();
+  for (const [w, l] of baseLineups) {
     const f = a.forecasts.get(w);
-    const pool: LineupCandidate[] = a.roster.flatMap(id => (a.players[id] && f?.get(id) ? [{ id, eligible: a.players[id].eligible, value: f.get(id)!.expected }] : []));
-    const lineup = optimizeLineup(a.slots, pool);
-    const bySlot = new Map<string, number>();
-    lineup.ids.forEach((id, i) => {
-      const v = id ? f?.get(id)?.expected ?? 0 : 0;
-      const slot = a.slots[i];
-      bySlot.set(slot, Math.min(bySlot.get(slot) ?? Infinity, v));
+    let min = Infinity, empty = false;
+    l.ids.forEach(id => {
+      if (!id) { empty = true; return; }
+      if (w === a.currentWeek && a.isLocked(id)) return;
+      min = Math.min(min, f?.get(id)?.expected ?? 0);
     });
-    weakest.set(w, bySlot);
+    floorByWeek.set(w, empty ? 0 : min);
   }
   const upperBound = (id: string) => {
     const p = a.players[id];
+    if (!a.slots.some(slot => canFill(p.eligible, slot))) return 0;
     let total = 0;
     for (const w of a.weeks) {
       const fc = a.forecasts.get(w)?.get(id);
       if (!fc || (w === a.currentWeek && a.isLocked(id))) continue;
-      let gap = 0;
-      for (const [slot, v] of weakest.get(w)!) if (canFill(p.eligible, slot)) gap = Math.max(gap, fc.expected - v);
-      total += gap * weight(w);
+      const floor = floorByWeek.get(w)!;
+      total += Math.max(0, fc.expected - (Number.isFinite(floor) ? floor : Infinity)) * weight(w);
     }
     return total;
   };
@@ -95,36 +113,42 @@ export function waiverRecommendations(a: Args): WaiverRecommendation[] {
 
   const needsDrop = a.roster.length >= a.rosterLimit;
   // Cost of losing each rostered player (lineup points over the horizon + dynasty keep value).
-  const dropCosts = new Map<string, { lineup: number; total: number }>();
+  const dropCosts = new Map<string, number>();
   if (needsDrop) {
     for (const id of a.roster) {
       if (a.protectedIds?.has(id) || a.isLocked(id)) continue;
       const without = a.roster.filter(x => x !== id);
       let loss = 0;
       for (const w of a.weeks) loss += (base.get(w)! - best(without, w)) * weight(w);
-      const keep = (a.dynasty.get(id) ?? 0) * DYNASTY_KEEP_WEIGHT;
-      dropCosts.set(id, { lineup: loss, total: loss + keep });
+      dropCosts.set(id, loss + (a.dynasty.get(id) ?? 0) * DYNASTY_KEEP_WEIGHT);
     }
   }
-  const dropOrder = [...dropCosts].sort((x, y) => x[1].total - y[1].total).map(([id]) => id);
+  const cheapest = [...dropCosts].sort((x, y) => x[1] - y[1]).map(([id]) => id).slice(0, 4);
 
   const recs: WaiverRecommendation[] = [];
   for (const c of candidates) {
     const withAdd = [...a.roster, c.id];
     let rosGain = 0, weekGain = 0;
     const startWeeks: number[] = [];
+    // Starters the pickup pushes out of the lineup: always worth testing as the drop.
+    const displaced = new Set<string>();
     for (const w of a.weeks) {
-      const g = best(withAdd, w) - base.get(w)!;
-      if (g > 0.05) startWeeks.push(w);
+      const after = lineup(withAdd, w);
+      const g = after.total - base.get(w)!;
+      if (g > 0.05) {
+        startWeeks.push(w);
+        const inAfter = new Set(after.ids);
+        for (const id of baseLineups.get(w)!.ids) if (id && !inAfter.has(id)) displaced.add(id);
+      }
       if (w === a.currentWeek) weekGain = g;
       rosGain += g * weight(w);
     }
     if (rosGain <= 0.05) continue;
     let dropId: string | null = null, dropCost = 0, netGain = rosGain;
     if (needsDrop) {
-      // Evaluate the three cheapest drops exactly with the new player on the roster.
       let bestNet = -Infinity;
-      for (const d of dropOrder.slice(0, 4)) {
+      const options = new Set([...cheapest, ...[...displaced].filter(id => dropCosts.has(id))]);
+      for (const d of options) {
         const after = withAdd.filter(x => x !== d);
         let gain = 0;
         for (const w of a.weeks) gain += (best(after, w) - base.get(w)!) * weight(w);
@@ -136,7 +160,7 @@ export function waiverRecommendations(a: Args): WaiverRecommendation[] {
           netGain = gain;
         }
       }
-      if (dropId === null) continue;
+      if (dropId === null || netGain <= 0.05) continue;
     }
     recs.push({ id: c.id, weekGain, rosGain, startWeeks, dropId, dropCost, netGain, competition: 0, faab: null, reasons: [] });
   }

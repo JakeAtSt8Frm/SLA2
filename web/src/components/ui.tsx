@@ -119,6 +119,31 @@ export function Pos({ pos, className }: { pos: string; className?: string }) {
   );
 }
 
+/**
+ * SLA 1.0 rank pill: position rank by season total or by points per game, washed on the
+ * red → yellow → green scale by where the rank falls in the position pool. The number is
+ * always printed, so colour only reinforces it.
+ */
+export function RankPill({ rank, kind }: { rank: { rank: number; outOf: number } | null | undefined; kind: 'Total' | 'PPG' }) {
+  if (!rank) return null;
+  const t = 1 - Math.min(1, rank.rank / Math.max(1, rank.outOf));
+  const hue = t < 0.5
+    ? `color-mix(in oklab, var(--ryg-low) ${Math.round((1 - t * 2) * 100)}%, var(--ryg-mid))`
+    : `color-mix(in oklab, var(--ryg-mid) ${Math.round((1 - (t - 0.5) * 2) * 100)}%, var(--ryg-high))`;
+  return (
+    <span title={`Position rank ${rank.rank} of ${rank.outOf} by ${kind === 'PPG' ? 'points per game' : 'total points'}`}
+      className="num inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-[5px] px-1.5 text-[10px] font-semibold text-ink"
+      style={{ background: `color-mix(in oklab, ${hue} 38%, var(--surface))` }}>
+      #{rank.rank}<span className="font-medium text-ink-2">{kind === 'PPG' ? 'PPG' : 'Tot'}</span>
+    </span>
+  );
+}
+
+export function Ranks({ ranks }: { ranks: { total: { rank: number; outOf: number } | null; ppg: { rank: number; outOf: number } | null } | null | undefined }) {
+  if (!ranks) return null;
+  return <><RankPill rank={ranks.total} kind="Total" /><RankPill rank={ranks.ppg} kind="PPG" /></>;
+}
+
 export function TeamDot({ rosterId, size = 10 }: { rosterId: number | null | undefined; size?: number }) {
   return <span aria-hidden className="inline-block shrink-0 rounded-full" style={{ width: size, height: size, background: teamColor(rosterId) }} />;
 }
@@ -289,14 +314,35 @@ export function useSort<T>(rows: T[], initial: { key: string; dir: 'asc' | 'desc
   return { sorted, header, sort };
 }
 
-/** Close on Escape and trap initial focus for drawers/dialogs. */
+/** Keep keyboard focus inside an open dialog and restore it when the dialog closes. */
 export function useEscape(onClose: () => void, active = true) {
   const ref = useRef(onClose);
+  const dialog = useRef<HTMLDivElement>(null);
   ref.current = onClose;
   useEffect(() => {
-    if (!active) return;
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') ref.current(); };
+    const panel = dialog.current;
+    if (!active || !panel) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusable = () => [...panel.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]')]
+      .filter(el => el.tabIndex >= 0 && !el.hasAttribute('disabled') && el.getClientRects().length > 0);
+    (focusable()[0] ?? panel).focus();
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); ref.current(); }
+      if (e.key !== 'Tab') return;
+      const targets = focusable();
+      const first = targets[0] ?? panel, last = targets.at(-1) ?? panel;
+      const focused = document.activeElement;
+      if (e.shiftKey && (focused === first || !panel.contains(focused))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (focused === last || !panel.contains(focused) || !targets.length)) { e.preventDefault(); first.focus(); }
+    };
     window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
+    return () => {
+      window.removeEventListener('keydown', h);
+      document.body.style.overflow = overflow;
+      if (previous?.isConnected) previous.focus();
+    };
   }, [active]);
+  return dialog;
 }

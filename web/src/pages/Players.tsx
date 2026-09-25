@@ -4,7 +4,7 @@ import { usePlayers } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { fmt, pct, POSITIONS } from '../lib/format.ts';
 import { Sparkline } from '../charts/charts.tsx';
-import { Button, Card, Delta, Empty, ErrorState, InfoTip, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Segmented, Select, TeamLink, useSort } from '../components/ui.tsx';
+import { Button, Card, Delta, Empty, ErrorState, InfoTip, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Segmented, Select, TeamLink, useSort } from '../components/ui.tsx';
 
 type Avail = 'all' | 'fa' | 'rostered' | 'mine';
 
@@ -15,11 +15,12 @@ export default function PlayersPage() {
   const query = useDeferredValue(text.trim().toLowerCase());
   const [pos, setPos] = useState('ALL');
   const [avail, setAvail] = useState<Avail>('all');
+  const activeAvail = avail === 'mine' && myTeamId === null ? 'all' : avail;
   const [limit, setLimit] = useState(100);
   const rows = useMemo(() => (q.data?.players ?? []).filter(r =>
     (pos === 'ALL' || r.pos === pos) &&
-    (avail === 'all' || (avail === 'fa' ? r.owner === null : avail === 'rostered' ? r.owner !== null : r.owner === myTeamId)) &&
-    (!query || r.name.toLowerCase().includes(query) || (r.team ?? '').toLowerCase() === query)), [q.data, pos, avail, query, myTeamId]);
+    (activeAvail === 'all' || (activeAvail === 'fa' ? r.owner === null : activeAvail === 'rostered' ? r.owner !== null : r.owner === myTeamId)) &&
+    (!query || r.name.toLowerCase().includes(query) || (r.team ?? '').toLowerCase() === query)), [q.data, pos, activeAvail, query, myTeamId]);
   const { sorted, header } = useSort(rows, { key: 'value', dir: 'desc' }, {
     name: r => r.name, exp: r => r.week?.exp, edge: r => (r.week && r.week.provider !== null ? r.week.exp - r.week.provider : null), ros: r => r.value?.rosAvg,
     ppg: r => r.season?.ppg, last3: r => r.season?.last3, snap: r => r.season?.snap, value: r => r.value?.value, dynasty: r => r.value?.dynasty, vorp: r => r.value?.vorp, age: r => r.age,
@@ -36,7 +37,7 @@ export default function PlayersPage() {
           <input value={text} onChange={e => { setText(e.target.value); setLimit(100); }} placeholder="Search name or NFL team" className="h-9 w-full rounded-[9px] border border-line-strong bg-surface pl-9 pr-3 text-[14px] placeholder:text-ink-3" />
         </label>
         <Segmented label="Position" value={pos} onChange={v => { setPos(v); setLimit(100); }} options={['ALL', ...POSITIONS].map(p => ({ value: p, label: p }))} />
-        <Select<Avail> label="Availability" value={avail} onChange={v => { setAvail(v); setLimit(100); }} options={[{ value: 'all', label: 'All players' }, { value: 'fa', label: 'Free agents' }, { value: 'rostered', label: 'Rostered' }, ...(myTeamId !== null ? [{ value: 'mine' as Avail, label: 'My team' }] : [])]} className="w-40" />
+        <Select<Avail> label="Availability" value={activeAvail} onChange={v => { setAvail(v); setLimit(100); }} options={[{ value: 'all', label: 'All players' }, { value: 'fa', label: 'Free agents' }, { value: 'rostered', label: 'Rostered' }, ...(myTeamId !== null ? [{ value: 'mine' as Avail, label: 'My team' }] : [])]} className="w-40" />
       </div>
       <Card pad={false}>
         {sorted.length === 0 ? <Empty title="No players match">Try another name, position or availability filter.</Empty> : (
@@ -62,7 +63,7 @@ export default function PlayersPage() {
               <tbody>
                 {sorted.slice(0, limit).map(r => (
                   <tr key={r.id} className="row-hover">
-                    <td><span className="flex items-center gap-2"><Pos pos={r.pos} /><PlayerLink id={r.id} name={r.name} className="max-w-[170px]" /><span className="text-[11px] text-ink-3">{r.team ?? 'FA'}</span><Injury status={r.injury} /></span></td>
+                    <td><span className="flex items-center gap-2"><Pos pos={r.pos} /><PlayerLink id={r.id} name={r.name} className="max-w-[170px]" /><span className="text-[11px] text-ink-3">{r.team ?? 'FA'}</span><Ranks ranks={r.ranks} /><Injury status={r.injury} /></span></td>
                     <td className="max-w-[150px] text-[12px]">{r.owner !== null ? <TeamLink rosterId={r.owner} /> : <span className="text-ink-3">Free agent</span>}</td>
                     <td className="r font-semibold">{r.week ? (r.week.bye ? 'BYE' : fmt(r.week.exp)) : '—'}</td>
                     <td className="r text-[12px]">{r.week && r.week.provider !== null && !r.week.bye ? <Delta value={r.week.exp - r.week.provider} /> : '—'}</td>

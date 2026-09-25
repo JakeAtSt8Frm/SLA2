@@ -1,32 +1,39 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useState, type ComponentType, type LazyExoticComponent } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeftRight, BarChart3, CalendarDays, ChartNoAxesCombined, FlaskConical, History, LayoutDashboard, ListChecks,
   Menu, Moon, RefreshCw, ScrollText, Search, Shield, Sparkles, Sun, Swords, Trophy, UserPlus, Users, X,
 } from 'lucide-react';
-import { searchLeagues, useBootstrap, type LeagueSearchResult } from './lib/api.ts';
+import { prefetchCore, searchLeagues, useBootstrap, type LeagueSearchResult } from './lib/api.ts';
 import { AppProvider, useApp, useTheme } from './lib/context.tsx';
 import { ago } from './lib/format.ts';
 import { DEFAULT_LEAGUE, navigate, pathFor, useRoute, type Page } from './lib/router.ts';
 import { Button, cx, ErrorState, PageSkeleton, Select, TeamAvatar, useEscape } from './components/ui.tsx';
 import { PlayerDrawer } from './components/PlayerDrawer.tsx';
 
-const pages: Record<Page, ComponentType> = {
-  hub: lazy(() => import('./pages/Hub.tsx')),
-  lineup: lazy(() => import('./pages/Lineup.tsx')),
-  waivers: lazy(() => import('./pages/Waivers.tsx')),
-  matchups: lazy(() => import('./pages/Matchups.tsx')),
-  power: lazy(() => import('./pages/Power.tsx')),
-  playoffs: lazy(() => import('./pages/Playoffs.tsx')),
-  players: lazy(() => import('./pages/Players.tsx')),
-  trade: lazy(() => import('./pages/Trade.tsx')),
-  recap: lazy(() => import('./pages/Recap.tsx')),
-  history: lazy(() => import('./pages/History.tsx')),
-  model: lazy(() => import('./pages/ModelLab.tsx')),
-  defense: lazy(() => import('./pages/Defense.tsx')),
-  team: lazy(() => import('./pages/Team.tsx')),
-  teams: lazy(() => import('./pages/Team.tsx')),
-  transactions: lazy(() => import('./pages/Transactions.tsx')),
+const pageModules: Record<Page, () => Promise<{ default: ComponentType }>> = {
+  hub: () => import('./pages/Hub.tsx'),
+  lineup: () => import('./pages/Lineup.tsx'),
+  waivers: () => import('./pages/Waivers.tsx'),
+  matchups: () => import('./pages/Matchups.tsx'),
+  power: () => import('./pages/Power.tsx'),
+  playoffs: () => import('./pages/Playoffs.tsx'),
+  players: () => import('./pages/Players.tsx'),
+  trade: () => import('./pages/Trade.tsx'),
+  recap: () => import('./pages/Recap.tsx'),
+  history: () => import('./pages/History.tsx'),
+  model: () => import('./pages/ModelLab.tsx'),
+  defense: () => import('./pages/Defense.tsx'),
+  team: () => import('./pages/Team.tsx'),
+  teams: () => import('./pages/Team.tsx'),
+  transactions: () => import('./pages/Transactions.tsx'),
+};
+const pages: Record<Page, LazyExoticComponent<ComponentType>> = {
+  hub: lazy(pageModules.hub), lineup: lazy(pageModules.lineup), waivers: lazy(pageModules.waivers),
+  matchups: lazy(pageModules.matchups), power: lazy(pageModules.power), playoffs: lazy(pageModules.playoffs),
+  players: lazy(pageModules.players), trade: lazy(pageModules.trade), recap: lazy(pageModules.recap),
+  history: lazy(pageModules.history), model: lazy(pageModules.model), defense: lazy(pageModules.defense),
+  team: lazy(pageModules.team), teams: lazy(pageModules.teams), transactions: lazy(pageModules.transactions),
 };
 
 const NAV: { group: string; items: { page: Page; label: string; icon: ComponentType<{ size?: number }> }[] }[] = [
@@ -68,18 +75,23 @@ export function App() {
     );
   }
   return (
-    <AppProvider leagueId={route.leagueId} boot={boot.data}>
+    <AppProvider key={route.leagueId} leagueId={route.leagueId} boot={boot.data}>
       <Shell />
     </AppProvider>
   );
 }
 
 function BootScreen() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 5000);
+    return () => clearTimeout(t);
+  }, []);
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-3 text-ink-2">
-      <ChartNoAxesCombined size={30} className="text-accent" aria-hidden />
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-3 px-6 text-center text-ink-2">
+      <ChartNoAxesCombined size={30} className="animate-pulse text-accent" aria-hidden />
       <div className="text-[15px] font-semibold text-ink">Loading your league</div>
-      <div className="text-[13px]">Scoring every player with your league’s rules…</div>
+      {slow && <div className="max-w-sm text-[13px]">Loading league data and calculating your custom-scoring forecasts. The first visit can take a little longer.</div>}
     </div>
   );
 }
@@ -95,6 +107,15 @@ function Shell() {
     document.title = `${titles[route.page] ?? 'SLA'} · ${boot.league.name} · SLA 2.0`;
   }, [route.page, boot.league.name]);
   const needsTeam = ['lineup', 'waivers'].includes(route.page) && myTeamId === null;
+  const client = useQueryClient();
+  useEffect(() => {
+    const t = setTimeout(() => {
+      prefetchCore(client, leagueId, myTeamId);
+      // Page code, too, so the first visit to each tab doesn't wait on a chunk download.
+      for (const page of ['lineup', 'waivers', 'matchups', 'players', 'power', 'playoffs', 'team', 'defense'] as const) void pageModules[page]().catch(() => undefined);
+    }, 600);
+    return () => clearTimeout(t);
+  }, [client, leagueId, myTeamId]);
   return (
     <div className="flex min-h-dvh">
       <aside className={cx('fixed inset-y-0 left-0 z-40 w-[248px] shrink-0 border-r border-line bg-surface transition-transform lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0', menu ? 'translate-x-0' : '-translate-x-full')}>
@@ -218,10 +239,10 @@ function PickTeam() {
 }
 
 function LeagueDialog({ onClose }: { onClose: () => void }) {
-  useEscape(onClose);
+  const dialog = useEscape(onClose);
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--overlay)] p-4 pt-[12vh]" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label="Switch league" className="card w-full max-w-md p-5 fade-in" onClick={e => e.stopPropagation()}>
+      <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Switch league" className="card w-full max-w-md p-5 fade-in" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-[16px] font-semibold">Switch league</h2>
           <button onClick={onClose} className="rounded-md p-1 text-ink-3 hover:bg-surface-2" aria-label="Close"><X size={18} /></button>

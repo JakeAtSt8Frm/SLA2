@@ -3,7 +3,7 @@ import { useLineup, type LineupReady, type PlayerRow } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { fmt, kickoff, prob, slotLabel } from '../lib/format.ts';
 import { RangeBar } from '../charts/charts.tsx';
-import { Card, CardHeader, Empty, ErrorState, InfoTip, Injury, Meter, Notice, PageHeader, PageSkeleton, PlayerLink, Pos, Stat, cx } from '../components/ui.tsx';
+import { Card, CardHeader, Empty, ErrorState, InfoTip, Injury, Meter, Notice, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Stat, cx } from '../components/ui.tsx';
 
 type Row = (PlayerRow & { locked: boolean }) | null;
 
@@ -57,7 +57,7 @@ export default function LineupPage() {
                     <td className={cx(changed && 'text-ink-3')}><PlayerCell r={cur} muted={changed} /></td>
                     <td className="num r text-ink-2">{cur?.week ? fmt(cur.week.exp) : '—'}</td>
                     <td className="text-ink-3">{changed ? <ArrowRight size={14} className="text-good-ink" aria-label="replace with" /> : ''}</td>
-                    <td><PlayerCell r={opt} /></td>
+                    <td><PlayerCell r={opt} ranks /></td>
                     <td className="num r font-semibold">{opt?.week ? fmt(opt.week.exp) : '—'}</td>
                     <td className="hidden md:table-cell">{opt?.week && !opt.week.bye && <RangeBar floor={opt.week.floor} median={opt.week.median} ceiling={opt.week.ceiling} expected={opt.week.exp} max={max} width={150} />}</td>
                     <td className="hidden whitespace-nowrap text-ink-2 lg:table-cell">{gameLabel(opt)}</td>
@@ -78,7 +78,7 @@ export default function LineupPage() {
               <tbody>
                 {l.bench.map(r => r && (
                   <tr key={r.id} className="row-hover">
-                    <td><PlayerCell r={r} /></td>
+                    <td><PlayerCell r={r} ranks /></td>
                     <td className="num r font-semibold">{r.week ? fmt(r.week.exp) : '—'}</td>
                     <td className="num r text-ink-2">{r.week ? fmt(r.week.mean) : '—'}</td>
                     <td className="num r text-ink-2">{r.week ? prob(r.week.play) : '—'}</td>
@@ -128,13 +128,14 @@ function gameLabel(r: Row) {
   return `${r.week.home ? 'vs' : '@'} ${r.week.opp} · ${kickoff(r.week.kickoff)}`;
 }
 
-function PlayerCell({ r, muted }: { r: Row; muted?: boolean }) {
+function PlayerCell({ r, muted, ranks }: { r: Row; muted?: boolean; ranks?: boolean }) {
   if (!r) return <span className="text-ink-3">Empty</span>;
   return (
     <span className="flex min-w-0 items-center gap-2">
       <Pos pos={r.pos} />
       <PlayerLink id={r.id} name={r.name} className={cx('max-w-[170px]', muted && 'font-normal text-ink-3')} />
       <span className="text-[11px] text-ink-3">{r.team}</span>
+      {ranks && <Ranks ranks={r.ranks} />}
       <Injury status={r.injury} />
       {r.locked && <Lock size={12} className="text-ink-3" aria-label="locked" />}
     </span>

@@ -17,20 +17,27 @@ export function compileScoring(settings: ScoringSettings): [string, number][] {
  * `players_points` exactly for this league (verified against official matchups).
  */
 export function scoreStats(stats: Stats, scoring: readonly [string, number][]): number {
-  let total = 0;
-  for (const [key, multiplier] of scoring) {
-    const value = stats[key];
-    if (value) total += value * multiplier;
-  }
-  return round(total);
+  return round(scoreStatsExact(stats, scoring));
 }
+
+const lookups = new WeakMap<readonly [string, number][], Map<string, number>>();
 
 /** Same as scoreStats but unrounded, for expected values built from fractional projections. */
 export function scoreStatsExact(stats: Stats, scoring: readonly [string, number][]): number {
   let total = 0;
-  for (const [key, multiplier] of scoring) {
-    const value = stats[key];
-    if (value) total += value * multiplier;
+  if (scoring.length <= 12) {
+    for (const [key, multiplier] of scoring) {
+      const value = stats[key];
+      if (value) total += value * multiplier;
+    }
+    return total;
+  }
+  // Large rule sets: walk the (smaller) stat line and look multipliers up.
+  let lookup = lookups.get(scoring);
+  if (!lookup) { lookup = new Map(scoring); lookups.set(scoring, lookup); }
+  for (const key in stats) {
+    const multiplier = lookup.get(key);
+    if (multiplier !== undefined) total += stats[key] * multiplier;
   }
   return total;
 }

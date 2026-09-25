@@ -33,7 +33,14 @@ export function optimizeLineup(
   if (n === 0) return { slots: [], ids: [], total: 0 };
   const lockedIds = new Set<string>();
   for (const id of locked.values()) if (id) lockedIds.add(id);
-  const pool = candidates.filter(c => Number.isFinite(c.value));
+  // One entry per player: a duplicated id must never fill two slots.
+  const byId = new Map<string, LineupCandidate>();
+  for (const c of candidates) {
+    if (!Number.isFinite(c.value)) continue;
+    const prev = byId.get(c.id);
+    if (!prev || c.value > prev.value) byId.set(c.id, c);
+  }
+  const pool = [...byId.values()];
   const m = pool.length + n;
   const cost = new Float64Array(n * m);
   for (let i = 0; i < n; i++) {

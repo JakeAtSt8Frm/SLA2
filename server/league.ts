@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { MINUTE } from './cache.ts';
 import {
-  nflGames, sleeper, sleeperSchedule, weekProjections, weekStats,
+  linesSignature, nflGames, sleeper, sleeperSchedule, weekProjections, weekStats,
   type SleeperLeague, type SleeperMatchup, type SleeperRoster, type SleeperTransaction, type SleeperUser, type WeekLine,
 } from './sleeper.ts';
 import { FeatureState } from '../engine/features.ts';
@@ -87,41 +87,117 @@ export function playoffShape(league: SleeperLeague) {
   };
 }
 
-async function buildCore(id: string): Promise<LeagueCore> {
+/** Yield to the event loop so requests keep flowing while a rebuild runs on a small CPU. */
+const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+
+const objectTags = new WeakMap<object, number>();
+let nextTag = 1;
+/** Stable id per object instance (changes when a cached value is replaced). */
+function tagOf(value: object): number {
+  let t = objectTags.get(value);
+  if (!t) { t = nextTag++; objectTags.set(value, t); }
+  return t;
+}
+
+interface Inputs {
+  state: Awaited<ReturnType<typeof sleeper.state>>;
+  league: SleeperLeague;
+  users: SleeperUser[];
+  rosters: SleeperRoster[];
+  players: Record<string, PlayerInfo>;
+  games: NflGame[];
+  week: number | null;
+  lastScored: number;
+  lastRegular: number;
+  last: number;
+  horizon: number[];
+  seasonOver: boolean;
+  pastWeeks: number[];
+  prevWeeks: number[];
+  prevStats: WeekLine[][];
+  prevProj: WeekLine[][];
+  curStats: WeekLine[][];
+  curProj: WeekLine[][];
+  futureProj: WeekLine[][];
+  liveStats: WeekLine[];
+  schedule: SleeperMatchup[][];
+  trending: { id: string; count: number }[];
+  liveSchedule: Awaited<ReturnType<typeof sleeperSchedule>>;
+  transactions: SleeperTransaction[];
+  warnings: string[];
+  fingerprint: string;
+}
+
+async function loadInputs(id: string): Promise<Inputs> {
   const warnings: string[] = [];
   const [state, league] = await Promise.all([sleeper.state(), sleeper.league(id)]);
   const [users, rosters, players, allGames] = await Promise.all([sleeper.users(id), sleeper.rosters(id), sleeper.players(), nflGames()]);
   const season = league.season;
-  const scoring = compileScoring(league.scoring);
-  const slots = starterSlots(league.rosterPositions);
   const { lastRegular, last } = lastFantasyWeek(league);
   const seasonOver = season < state.season || league.status === 'complete';
   const preseason = league.status === 'pre_draft' || league.status === 'drafting';
   const week = seasonOver ? null : preseason ? 1 : Math.min(Math.max(1, league.week), last);
   const lastScored = seasonOver ? last : Math.min(league.lastScoredWeek, (week ?? 1) - 1);
   const horizon = week === null ? [] : Array.from({ length: last - week + 1 }, (_, i) => week + i);
-
   const fresh = (s: number, w: number) => ({ season: s, week: w, currentSeason: state.season, currentWeek: state.season === season ? state.week : 99 });
+  const pastWeeks = Array.from({ length: Math.max(0, (week ?? last + 1) - 1) }, (_, i) => i + 1);
+  const prevWeeks = Array.from({ length: weeksIn(season - 1) }, (_, i) => i + 1);
+  const none = () => [] as WeekLine[];
+  const txWeeks = Array.from({ length: Math.max(1, week ?? last) }, (_, i) => i + 1);
+  const [prevStats, prevProj, curStats, curProj, futureProj, liveStats, schedule, trending, liveSchedule, txLists] = await Promise.all([
+    Promise.all(prevWeeks.map(w => weekStats(fresh(season - 1, w)).catch(none))),
+    Promise.all(prevWeeks.map(w => weekProjections(fresh(season - 1, w)).catch(none))),
+    Promise.all(pastWeeks.map(w => weekStats(fresh(season, w)).catch(none))),
+    Promise.all(pastWeeks.map(w => weekProjections(fresh(season, w)).catch(none))),
+    Promise.all(horizon.map(w => weekProjections(fresh(season, w)).catch(none))),
+    week !== null ? weekStats(fresh(season, week)).catch(none) : Promise.resolve(none()),
+    Promise.all(Array.from({ length: lastRegular }, (_, i) => sleeper.matchups(id, i + 1, seasonOver).catch(() => [] as SleeperMatchup[]))),
+    sleeper.trending('add').catch(() => []),
+    week !== null ? sleeperSchedule(season).catch(() => []) : Promise.resolve([]),
+    Promise.all(txWeeks.map(w => sleeper.transactions(id, w, seasonOver || (week !== null && w < week - 1)).catch(() => []))),
+  ]);
   const games = allGames.filter(g => g.season === season);
+  if (!games.length) warnings.push('NFL schedule unavailable: kickoff locks and byes cannot be verified.');
+  const transactions = txLists.flat().filter(t => t.status === 'complete').sort((a, b) => b.created - a.created);
+
+  // Everything that can change a number on screen. Unchanged fingerprint → reuse the last core.
+  const now = Date.now();
+  const kickedOff = week === null ? 0 : games.filter(g => g.week === week && g.kickoff !== null && g.kickoff <= now).length;
+  const fingerprint = [
+    tagOf(players), tagOf(allGames),
+    JSON.stringify([league.week, league.lastScoredWeek, league.status, league.scoring, league.rosterPositions, league.name]),
+    JSON.stringify(rosters), JSON.stringify(users),
+    JSON.stringify(schedule.map(ms => ms.map(m => [m.rosterId, m.matchupId, m.points, m.starters]))),
+    [...curStats, ...curProj, ...futureProj, liveStats].map(linesSignature).join(','),
+    JSON.stringify(liveSchedule.filter(g => g.week === week)), kickedOff,
+    transactions.length ? `${transactions.length}:${transactions[0].created}` : '0',
+  ].join('|');
+
+  return {
+    state, league, users, rosters, players, games, week, lastScored, lastRegular, last, horizon, seasonOver, pastWeeks, prevWeeks,
+    prevStats, prevProj, curStats, curProj, futureProj, liveStats, schedule, trending, liveSchedule, transactions, warnings, fingerprint,
+  };
+}
+
+async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
+  const { league, users, rosters, games, week, lastScored, lastRegular, last, horizon, pastWeeks, prevWeeks,
+    prevStats, prevProj, curStats, curProj, futureProj, liveStats, schedule, liveSchedule, warnings } = input;
+  const season = league.season;
+  const scoring = compileScoring(league.scoring);
+  const slots = starterSlots(league.rosterPositions);
+
+  // Injury tags ride along with the (frequently refreshed) projection rows; prefer whichever is newer.
+  const players: Record<string, PlayerInfo> = Object.create(input.players) as Record<string, PlayerInfo>;
+  for (const line of [...(futureProj[0] ?? []), ...liveStats]) {
+    const base = input.players[line.id];
+    if (!base || !line.injury) continue;
+    const newer = (line.injury.at ?? 0) >= (base.newsUpdated ?? 0);
+    if (newer && line.injury.status !== base.injuryStatus) players[line.id] = { ...base, injuryStatus: line.injury.status, newsUpdated: line.injury.at ?? base.newsUpdated };
+  }
+
   const gameIndex = new Map<string, NflGame>();
   for (const g of games) { gameIndex.set(`${g.week}:${g.home}`, g); gameIndex.set(`${g.week}:${g.away}`, g); }
   const gameFor = (team: string, w: number) => gameIndex.get(`${w}:${team}`);
-  if (!games.length) warnings.push('NFL schedule unavailable: kickoff locks and byes cannot be verified.');
-
-  // Completed weeks this season + all of last season feed the feature state.
-  const pastWeeks = Array.from({ length: Math.max(0, (week ?? last + 1) - 1) }, (_, i) => i + 1);
-  const prevWeeks = Array.from({ length: weeksIn(season - 1) }, (_, i) => i + 1);
-  const [prevStats, prevProj, curStats, curProj, futureProj, liveStats, schedule, trendingAdds] = await Promise.all([
-    Promise.all(prevWeeks.map(w => weekStats(fresh(season - 1, w)).catch(() => [] as WeekLine[]))),
-    Promise.all(prevWeeks.map(w => weekProjections(fresh(season - 1, w)).catch(() => [] as WeekLine[]))),
-    Promise.all(pastWeeks.map(w => weekStats(fresh(season, w)).catch(() => { warnings.push(`Week ${w} stats unavailable.`); return [] as WeekLine[]; }))),
-    Promise.all(pastWeeks.map(w => weekProjections(fresh(season, w)).catch(() => [] as WeekLine[]))),
-    Promise.all(horizon.map(w => weekProjections(fresh(season, w)).catch(() => { warnings.push(`Week ${w} projections unavailable; forecasts fall back to form.`); return [] as WeekLine[]; }))),
-    week !== null ? weekStats(fresh(season, week)).catch(() => [] as WeekLine[]) : Promise.resolve([] as WeekLine[]),
-    Promise.all(Array.from({ length: lastRegular }, (_, i) => sleeper.matchups(id, i + 1, seasonOver).catch(() => [] as SleeperMatchup[]))),
-    sleeper.trending('add').catch(() => []),
-  ]);
-  const liveSchedule = week !== null ? await sleeperSchedule(season).catch(() => []) : [];
 
   const fs = new FeatureState(scoring, pid => {
     const p = players[pid];
@@ -130,10 +206,14 @@ async function buildCore(id: string): Promise<LeagueCore> {
   const toMap = (lines: WeekLine[]) => new Map(lines.map(l => [l.id, l]));
   const projStatsMap = (lines: WeekLine[]) => new Map(lines.filter(l => hasForecast(l.stats)).map(l => [l.id, l.stats]));
   fs.startSeason(season - 1);
-  prevWeeks.forEach((w, i) => fs.ingestWeek(season - 1, w, prevStats[i], projStatsMap(prevProj[i])));
+  for (let i = 0; i < prevWeeks.length; i++) {
+    fs.ingestWeek(season - 1, prevWeeks[i], prevStats[i], projStatsMap(prevProj[i]));
+    if (i % 3 === 2) await tick();
+  }
   fs.startSeason(season);
-  pastWeeks.forEach((w, i) => fs.ingestWeek(season, w, curStats[i], projStatsMap(curProj[i])));
+  for (let i = 0; i < pastWeeks.length; i++) fs.ingestWeek(season, pastWeeks[i], curStats[i], projStatsMap(curProj[i]));
   fs.clearAverages();
+  await tick();
 
   const projectionsByWeek = new Map<number, Map<string, WeekLine>>();
   horizon.forEach((w, i) => projectionsByWeek.set(w, toMap(futureProj[i])));
@@ -146,20 +226,19 @@ async function buildCore(id: string): Promise<LeagueCore> {
 
   const statusIndex = new Map<string, 'pre_game' | 'in_game' | 'complete'>();
   for (const g of liveSchedule) {
-    const s = g.status === 'complete' ? 'complete' : g.status === 'in_game' ? 'in_game' : 'pre_game';
-    statusIndex.set(`${g.week}:${g.home}`, s);
-    statusIndex.set(`${g.week}:${g.away}`, s);
+    const st = g.status === 'complete' ? 'complete' : g.status === 'in_game' ? 'in_game' : 'pre_game';
+    statusIndex.set(`${g.week}:${g.home}`, st);
+    statusIndex.set(`${g.week}:${g.away}`, st);
   }
   const now = Date.now();
   const gameStatus = (team: string, w: number) => {
-    const s = statusIndex.get(`${w}:${team}`);
+    const st = statusIndex.get(`${w}:${team}`);
     const kickoff = gameFor(team, w)?.kickoff;
     // Sleeper's status can lag kickoff by a few minutes; the published kickoff time is authoritative for locks.
-    if ((!s || s === 'pre_game') && kickoff && kickoff <= now) return 'in_game' as const;
-    return s;
+    if ((!st || st === 'pre_game') && kickoff && kickoff <= now) return 'in_game' as const;
+    return st;
   };
   const liveMap = new Map<string, Stats>(liveStats.map(l => [l.id, l.stats]));
-
   const env: ForecastEnv = {
     model, state: fs, season, currentWeek: week ?? last + 1, players, scoring, gameFor,
     projections: w => projectionsByWeek.get(w), liveStats: liveMap, gameStatus, now,
@@ -180,11 +259,22 @@ async function buildCore(id: string): Promise<LeagueCore> {
     return p && p.pos !== 'DEF' && startable(slots, p) && (ownerOf.has(pid) || fs.history(pid).length > 0 || projectionsByWeek.get(horizon[0] ?? -1)?.has(pid));
   });
 
+  // Everyone gets the next two weeks; later weeks only for players who could matter to a lineup.
   const forecasts = new Map<number, Map<string, WeekForecast>>();
-  for (const w of horizon) {
+  let longHorizon = relevant;
+  for (let i = 0; i < horizon.length; i++) {
+    const w = horizon[i];
+    if (i === 2) {
+      longHorizon = relevant.filter(pid => ownerOf.has(pid) || Math.max(forecasts.get(horizon[0])?.get(pid)?.expected ?? 0, forecasts.get(horizon[1])?.get(pid)?.expected ?? 0) >= 1.5);
+    }
     const m = new Map<string, WeekForecast>();
-    for (const pid of relevant) m.set(pid, forecastPlayer(env, pid, w));
+    const ids = i < 2 ? relevant : longHorizon;
+    for (let k = 0; k < ids.length; k++) {
+      m.set(ids[k], forecastPlayer(env, ids[k], w));
+      if (k % 400 === 399) await tick();
+    }
     forecasts.set(w, m);
+    await tick();
   }
 
   const isLocked = (pid: string) => {
@@ -213,6 +303,7 @@ async function buildCore(id: string): Promise<LeagueCore> {
       if (w === week) { bestByWeek.set(`${t.rosterId}:${w}`, advice.get(t.rosterId)!.optimal); continue; }
       bestByWeek.set(`${t.rosterId}:${w}`, bestLineup(slots, active, players, forecasts.get(w)!));
     }
+    await tick();
   }
 
   const results: TeamWeek[][] = [];
@@ -221,50 +312,68 @@ async function buildCore(id: string): Promise<LeagueCore> {
     if (ms?.length) results.push(buildTeamWeeks(w, ms, slots, players));
   }
   const summaries = summarizeSeason(results, teams.map(t => t.rosterId));
-
+  await tick();
   const values = computeValues({ ids: relevant, players, weeks: horizon, forecasts, rostered: new Set(ownerOf.keys()) });
-
-  const txWeeks = Array.from({ length: Math.max(1, week ?? last) }, (_, i) => i + 1);
-  const transactions = (await Promise.all(txWeeks.map(w => sleeper.transactions(id, w, seasonOver || (week !== null && w < week - 1)).catch(() => [])))).flat()
-    .filter(t => t.status === 'complete').sort((a, b) => b.created - a.created);
-
-  if (week !== null && !projectionsByWeek.get(week)?.size) warnings.push('No provider projections for this week yet; forecasts rely on recent form only.');
 
   return {
     id, league, users, teams, season, week, lastScored, lastRegularWeek: lastRegular, lastWeek: last, horizon, slots, players, relevant,
     forecasts, env, ownerOf, taxiOrIr, schedule: new Map(schedule.map((m, i) => [i + 1, m])), results, summaries, values, advice, bestByWeek,
-    transactions, trending: new Map(trendingAdds.map(t => [t.id, t.count])), statsByWeek, prevStatsByWeek, projectionsByWeek,
+    transactions: input.transactions, trending: new Map(input.trending.map(t => [t.id, t.count])), statsByWeek, prevStatsByWeek, projectionsByWeek,
     games, gameFor, isLocked, generatedAt: new Date(now).toISOString(), warnings,
   };
 }
 
-const cores = new Map<string, { core: LeagueCore; at: number }>();
+interface CoreEntry { core: LeagueCore; at: number; fingerprint: string }
+const cores = new Map<string, CoreEntry>();
 const rebuilding = new Map<string, Promise<LeagueCore>>();
-const FRESH = 1.5 * MINUTE;
+const listeners: ((core: LeagueCore) => void)[] = [];
+/** Refresh check interval: tighter while games are being played. */
+const FRESH_IDLE = 5 * MINUTE;
+const FRESH_LIVE = 1.5 * MINUTE;
 /** An older core is still shown instantly (with its timestamp) while a fresh one builds. */
 const USABLE = 12 * 60 * MINUTE;
+
+/** Run after every new core (e.g. to precompute the heaviest views in the background). */
+export function onCoreBuilt(listener: (core: LeagueCore) => void) {
+  listeners.push(listener);
+}
 
 function rebuild(id: string): Promise<LeagueCore> {
   let p = rebuilding.get(id);
   if (!p) {
-    p = buildCore(id).then(core => {
-      cores.set(id, { core, at: Date.now() });
+    p = (async () => {
+      const input = await loadInputs(id);
+      const hit = cores.get(id);
+      // Nothing changed upstream: keep the existing core (and every view already computed from it).
+      if (hit && hit.fingerprint === input.fingerprint) {
+        hit.at = Date.now();
+        return hit.core;
+      }
+      const core = await computeCore(id, input);
+      cores.set(id, { core, at: Date.now(), fingerprint: input.fingerprint });
       if (cores.size > 20) cores.delete(cores.keys().next().value!);
+      for (const l of listeners) { try { l(core); } catch { /* warming is best-effort */ } }
       return core;
-    }).finally(() => rebuilding.delete(id));
+    })().finally(() => rebuilding.delete(id));
     rebuilding.set(id, p);
   }
   return p;
 }
 
+function isLive(core: LeagueCore): boolean {
+  if (core.week === null) return false;
+  const now = Date.now();
+  return core.games.some(g => g.week === core.week && g.kickoff !== null && g.kickoff <= now && now - g.kickoff < 4.5 * 60 * MINUTE);
+}
+
 /**
- * Stale-while-revalidate: a core younger than 90 s is served as is; an older one (up to 12 h)
- * is served instantly while a fresh build runs in the background. Live games stay within ~90 s.
+ * Stale-while-revalidate. A recent core is served as is; an older one (up to 12 h) is served
+ * instantly while inputs are re-checked in the background and the core is rebuilt only if they changed.
  */
 export function getCore(id: string): Promise<LeagueCore> {
   const hit = cores.get(id);
   const age = hit ? Date.now() - hit.at : Infinity;
-  if (hit && age < FRESH) return Promise.resolve(hit.core);
+  if (hit && age < (isLive(hit.core) ? FRESH_LIVE : FRESH_IDLE)) return Promise.resolve(hit.core);
   if (hit && age < USABLE) {
     void rebuild(id).catch(error => console.warn(`[core] refresh failed for ${id}:`, (error as Error).message));
     return Promise.resolve(hit.core);
