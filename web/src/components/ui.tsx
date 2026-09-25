@@ -181,7 +181,8 @@ export function TeamLink({ rosterId, showAvatar = false, className }: { rosterId
 export function PlayerLink({ id, name, className }: { id: string; name: string; className?: string }) {
   const { openPlayer } = useApp();
   return (
-    <button onClick={() => openPlayer(id)} className={cx('min-w-0 truncate text-left font-medium text-ink hover:underline', className)}>{name}</button>
+    // Truncates in tight rows but never collapses to nothing beside fixed-width pills.
+    <button onClick={() => openPlayer(id)} title={name} className={cx('min-w-[4.5rem] truncate text-left font-medium text-ink hover:underline', className)}>{name}</button>
   );
 }
 
@@ -279,12 +280,18 @@ export function useTooltip() {
 
 export function InfoTip({ children }: { children: ReactNode }) {
   const t = useTooltip();
+  const showBelow = (el: Element) => { const r = el.getBoundingClientRect(); t.show({ clientX: r.right, clientY: r.bottom + 20 }, children); };
+  // A span, not a button: tips sit inside sortable header buttons, and buttons can't nest.
+  // Clicks stop here so tapping a tip (phones) shows it instead of re-sorting the column.
   return (
     <>
-      <button type="button" aria-label="More info" className="inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-3 hover:text-ink"
-        onMouseEnter={e => t.show(e, children)} onMouseMove={e => t.show(e, children)} onMouseLeave={t.hide} onFocus={e => { const r = e.currentTarget.getBoundingClientRect(); t.show({ clientX: r.right, clientY: r.bottom + 20 }, children); }} onBlur={t.hide}>
+      <span role="button" tabIndex={0} aria-label="More info" className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full text-ink-3 hover:text-ink"
+        onMouseEnter={e => t.show(e, children)} onMouseMove={e => t.show(e, children)} onMouseLeave={t.hide}
+        onClick={e => { e.stopPropagation(); showBelow(e.currentTarget); }}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); showBelow(e.currentTarget); } }}
+        onFocus={e => showBelow(e.currentTarget)} onBlur={t.hide}>
         <CircleAlert size={13} aria-hidden />
-      </button>
+      </span>
       {t.node}
     </>
   );

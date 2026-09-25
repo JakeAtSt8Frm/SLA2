@@ -439,8 +439,11 @@ export async function waivers(id: string, rosterId: number) {
       isLocked: core.isLocked,
       limit: 30,
     });
-    const fa = freeAgents.map(pid => playerRow(core, pid)).filter(r => (r.week?.exp ?? 0) > 0.5 || (r.value?.rosAvg ?? 0) > 1)
-      .sort((a, b) => (b.value?.rosAvg ?? 0) - (a.value?.rosAvg ?? 0)).slice(0, 150);
+    // Everyone available who could plausibly matter: forecast to score, or has scored this season.
+    const gainOf = new Map(recs.map(r => [r.id, r]));
+    const fa = freeAgents.map(pid => ({ ...playerRow(core, pid), gain: gainOf.has(pid) ? r1(gainOf.get(pid)!.netGain) : null }))
+      .filter(r => (r.week?.exp ?? 0) > 0.3 || (r.value?.rosAvg ?? 0) > 0.5 || (r.season?.ppg ?? 0) > 2)
+      .sort((a, b) => (b.value?.rosAvg ?? 0) - (a.value?.rosAvg ?? 0));
     return {
       week: core.week,
       rosterCount: active.length,
@@ -451,6 +454,7 @@ export async function waivers(id: string, rosterId: number) {
         ...r, weekGain: r2(r.weekGain), rosGain: r1(r.rosGain), dropCost: r1(r.dropCost), netGain: r1(r.netGain),
         player: playerRow(core, r.id), drop: r.dropId ? playerRow(core, r.dropId) : null,
       })),
+      availableCount: fa.length,
       freeAgents: fa,
     };
   });
@@ -768,8 +772,8 @@ export class HttpError extends Error {
 export async function defense(id: string, requestedSeason?: number): Promise<DefenseView> {
   const core = await getCore(id);
   const seasons = [core.season, core.season - 1];
-  // Early in the year the current season is too thin to rank defenses; default to last season.
-  const defaultSeason = core.lastScored >= 4 ? core.season : core.season - 1;
+  // The current season as soon as a week of it is in; last season only before week 1 is scored.
+  const defaultSeason = core.lastScored >= 1 ? core.season : core.season - 1;
   const season = requestedSeason && seasons.includes(requestedSeason) ? requestedSeason : defaultSeason;
   const compute = (): DefenseView => {
     const source = season === core.season ? core.statsByWeek : core.prevStatsByWeek;
