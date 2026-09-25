@@ -1,6 +1,8 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
 export const DEFAULT_LEAGUE = '1312656463549726720';
+/** Sleeper league ids are long numbers; ESPN leagues are `espn-<id>` (optionally `-<season>`). */
+export const isLeagueId = (id: string) => /^(\d{10,22}|espn-\d{4,12}(-\d{4})?)$/.test(id);
 
 export type Page =
   | 'hub' | 'lineup' | 'waivers' | 'matchups' | 'power' | 'playoffs' | 'players'
@@ -13,7 +15,7 @@ export interface Route { leagueId: string; page: Page; param: string | null; sea
 function parse(): Route {
   const parts = window.location.pathname.split('/').filter(Boolean);
   const search = new URLSearchParams(window.location.search);
-  if (parts[0] === 'league' && parts[1] && /^\d{10,22}$/.test(parts[1])) {
+  if (parts[0] === 'league' && parts[1] && isLeagueId(parts[1])) {
     const page = (PAGES.has(parts[2] as Page) ? parts[2] : 'hub') as Page;
     return { leagueId: parts[1], page, param: parts[3] ?? null, search };
   }

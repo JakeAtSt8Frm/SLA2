@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, CircleAlert, Inbox, RefreshCw } from 'lucide-react';
-import { INJURY_SHORT, teamColor } from '../lib/format.ts';
+import { INJURY_SHORT, posLabel, teamColor } from '../lib/format.ts';
+import { usePlatform } from '../lib/context.tsx';
 import { useApp } from '../lib/context.tsx';
 import { navigate, pathFor } from '../lib/router.ts';
 
@@ -111,10 +112,11 @@ const POS_TINT: Record<string, string> = { QB: 'var(--team-8)', RB: 'var(--team-
 /** Position chip: tinted wash with ink text (text never wears the data colour). */
 export function Pos({ pos, className }: { pos: string; className?: string }) {
   const tint = POS_TINT[pos] ?? 'var(--ink-3)';
+  const platform = usePlatform();
   return (
     <span className={cx('inline-flex h-[18px] min-w-[26px] shrink-0 items-center justify-center rounded-[5px] px-1 text-[10px] font-bold tracking-wide text-ink', className)}
       style={{ background: `color-mix(in oklab, ${tint} 22%, transparent)`, boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${tint} 38%, transparent)` }}>
-      {pos}
+      {posLabel(pos, platform ?? undefined)}
     </span>
   );
 }

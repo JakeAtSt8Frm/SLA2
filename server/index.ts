@@ -5,6 +5,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getCore } from './league.ts';
+import { configuredEspnLeagues, validEspnId } from './espn.ts';
 import { findLeagues } from './sleeper.ts';
 import { recordSnapshot, trackRecord } from './snapshots.ts';
 import * as views from './views.ts';
@@ -19,7 +20,7 @@ app.use('/api/*', compress());
 
 const leagueId = (c: Context) => {
   const id = c.req.param('id') ?? '';
-  if (!/^\d{10,22}$/.test(id)) throw new HttpError(400, 'Enter a valid Sleeper league ID.');
+  if (!/^\d{10,22}$/.test(id) && !validEspnId(id)) throw new HttpError(400, 'Enter a valid Sleeper league ID.');
   return id;
 };
 const rosterId = (c: Context) => {
@@ -34,6 +35,8 @@ const json = (c: Context, data: unknown, maxAge = 30) => {
 
 app.get('/api/health', c => c.json({ ok: true, service: 'sla2', time: new Date().toISOString() }));
 app.get('/api/model', c => json(c, views.model(), 300));
+app.get('/api/leagues', async c => json(c, await views.configuredLeagues(DEFAULT_LEAGUE), 300));
+app.get('/api/leagues/:id/model', c => json(c, views.model(leagueId(c)), 300));
 app.get('/api/leagues/:id/bootstrap', async c => {
   const id = leagueId(c);
   const data = await views.bootstrap(id);
@@ -55,7 +58,7 @@ app.get('/api/leagues/:id/teams/:rid/waivers', async c => json(c, await views.wa
 app.get('/api/leagues/:id/players', async c => json(c, await views.players(leagueId(c)), 60));
 app.get('/api/leagues/:id/players/:pid', async c => {
   const pid = c.req.param('pid');
-  if (!/^[A-Za-z0-9_]{1,12}$/.test(pid)) throw new HttpError(400, 'Invalid player.');
+  if (!/^[A-Za-z0-9_:]{1,20}$/.test(pid)) throw new HttpError(400, 'Invalid player.');
   return json(c, await views.player(leagueId(c), pid));
 });
 app.post('/api/leagues/:id/trade', async c => {
@@ -83,12 +86,14 @@ app.onError((error, c) => {
   if (error instanceof HttpError) return c.json({ error: error.message }, error.status as 400);
   const message = error instanceof Error ? error.message : String(error);
   console.error('[api]', c.req.path, message);
-  if ((error as { status?: number }).status === 404 || /League not found/.test(message)) {
-    const what = c.req.path.startsWith('/api/users/') ? 'Sleeper user not found. Check the username.' : 'League not found. Check the Sleeper league ID.';
+  const status = (error as { status?: number }).status;
+  if (status === 404 || /League not found/.test(message)) {
+    const what = c.req.path.startsWith('/api/users/') ? 'Sleeper user not found. Check the username.' : 'League not found. Check the league ID.';
     return c.json({ error: what }, 404);
   }
+  if (status === 401 || status === 403) return c.json({ error: 'ESPN rejected the saved login. The espn_s2 cookie in config/espn.json needs refreshing.' }, 502);
   if (/Only NFL/.test(message)) return c.json({ error: message }, 400);
-  return c.json({ error: 'Could not load league data from Sleeper. Try again in a moment.' }, 502);
+  return c.json({ error: 'Could not load league data. Try again in a moment.' }, 502);
 });
 
 // Production: serve the built SPA with long-lived hashed assets.
@@ -104,10 +109,17 @@ if (existsSync(DIST)) {
 
 serve({ fetch: app.fetch, port: PORT, hostname: process.env.HOST ?? '127.0.0.1' }, info => {
   console.log(`SLA 2.0 API listening on http://${info.address}:${info.port}`);
-  // Warm the default league so the first page load is instant.
-  const t = Date.now();
-  getCore(DEFAULT_LEAGUE).then(core => {
-    console.log(`warmed ${core.league.name} in ${Date.now() - t} ms (${core.relevant.length} players, weeks ${core.horizon[0] ?? '-'}–${core.horizon.at(-1) ?? '-'})`);
-    return recordSnapshot(core);
-  }).catch(error => console.warn('warmup failed:', (error as Error).message));
+  // Warm every configured league, one at a time (small hosts have a fraction of a CPU), so first loads are instant.
+  void (async () => {
+    for (const id of [DEFAULT_LEAGUE, ...configuredEspnLeagues().map(l => l.id)]) {
+      const t = Date.now();
+      try {
+        const core = await getCore(id);
+        console.log(`warmed ${core.league.name} in ${Date.now() - t} ms (${core.relevant.length} players, weeks ${core.horizon[0] ?? '-'}–${core.horizon.at(-1) ?? '-'})`);
+        await recordSnapshot(core);
+      } catch (error) {
+        console.warn(`warmup failed for ${id}:`, (error as Error).message);
+      }
+    }
+  })();
 });

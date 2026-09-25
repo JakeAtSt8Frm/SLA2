@@ -295,7 +295,7 @@ export const sleeper = {
   losersBracket: (id: string, final = false) => cached(`lb:${id}`, final ? FOREVER : 10 * MINUTE, async () => parseBracket(await sleeperJson(`/v1/league/${id}/losers_bracket`)), { disk: final }),
   trending: (type: 'add' | 'drop') => cached(`trending:${type}`, 15 * MINUTE, async () =>
     arr(await sleeperJson(`/v1/players/nfl/trending/${type}?lookback_hours=48&limit=100`)).map(x => ({ id: str(obj(x).player_id) ?? '', count: num(obj(x).count) }))),
-  players: () => cached('players', 12 * HOUR, loadPlayers, { disk: true, swr: true }),
+  players: () => cached('players-v2', 12 * HOUR, loadPlayers, { disk: true, swr: true }),
 };
 
 // ─── Players ─────────────────────────────────────────────────────────────────
@@ -338,6 +338,7 @@ async function loadPlayers(): Promise<Record<string, PlayerInfo>> {
       number: numOrNull(row.number),
       college: str(row.college),
       newsUpdated: numOrNull(row.news_updated),
+      espnId: row.espn_id === null || row.espn_id === undefined ? null : String(row.espn_id),
     };
   }
   return out;

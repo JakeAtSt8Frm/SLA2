@@ -11,6 +11,11 @@ export interface ModelFile {
   meta: { version: string; trainedAt: string; trainingRows: number; seasons: number[] };
   features: string[];
   residualTarget: boolean;
+  /**
+   * Share of the trees' correction to the provider projection that is applied (0–1), chosen on
+   * a tuning season. Leagues where the trees don't beat the provider shrink toward it. Default 1.
+   */
+  shrink?: number;
   points: { baseline: number; trees: ExportedTree[] };
   residuals: Record<string, { edges: number[]; quantiles: number[][] }>;
   availability: { none: number; Questionable: number; Doubtful: number; Out: number };
@@ -29,6 +34,7 @@ export class ProjectionModel {
   private baseline: number;
   private columns: Int32Array;
   private residualTarget: boolean;
+  private shrink: number;
   private residuals: ModelFile['residuals'];
   private avail: ModelFile['availability'];
 
@@ -36,6 +42,7 @@ export class ProjectionModel {
     this.meta = file.meta;
     this.baseline = file.points.baseline;
     this.residualTarget = file.residualTarget;
+    this.shrink = file.shrink ?? 1;
     // Centre each residual curve so simulated means equal the model's point forecast.
     this.residuals = Object.fromEntries(Object.entries(file.residuals).map(([pos, table]) => [pos, {
       edges: table.edges,
@@ -71,6 +78,7 @@ export class ProjectionModel {
       out += tree.v[node];
     }
     if (this.residualTarget) {
+      out *= this.shrink;
       const proj = x[IDX.proj_pts];
       const base = !Number.isNaN(proj) ? proj : !Number.isNaN(x[IDX.ewma]) ? x[IDX.ewma] : !Number.isNaN(x[IDX.mean_prev]) ? x[IDX.mean_prev] : 0;
       out += base;

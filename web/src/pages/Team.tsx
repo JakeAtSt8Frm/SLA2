@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { useTeam, type TeamPage } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
-import { ago, fmt, ordinal, POSITIONS, prob, record, teamColor } from '../lib/format.ts';
+import { ago, fmt, ordinal, posLabel, prob, record, teamColor } from '../lib/format.ts';
 import { navigate, pathFor, useRoute } from '../lib/router.ts';
 import { WeekColumns, WinBar } from '../charts/charts.tsx';
 import { Button, Card, CardHeader, Delta, Empty, ErrorState, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Select, Stat, TeamAvatar, TeamLink, cx } from '../components/ui.tsx';
@@ -20,14 +20,17 @@ export default function TeamRoute() {
 function TeamView({ t }: { t: TeamPage }) {
   const { leagueId, boot, myTeamId, teamName } = useApp();
   const team = t.team;
-  const byPos = useMemo(() => POSITIONS.map(pos => ({ pos, players: t.roster.filter(r => r.pos === pos).sort((a, b) => (b.value?.rosAvg ?? 0) - (a.value?.rosAvg ?? 0)) })).filter(g => g.players.length), [t.roster]);
+  const positions = boot.league.positions;
+  // League positions first; anyone else (e.g. an IDP stashed in a non-IDP league) at the end.
+  const byPos = useMemo(() => [...positions, ...new Set(t.roster.map(r => r.pos).filter(p => !positions.includes(p)))].map(pos => ({ pos, players: t.roster.filter(r => r.pos === pos).sort((a, b) => (b.value?.rosAvg ?? 0) - (a.value?.rosAvg ?? 0)) })).filter(g => g.players.length), [t.roster, positions]);
+  const acquisition = boot.league.waiverMode === 'faab' ? ` · $${team.faabRemaining} FAAB left` : team.waiverPosition ? ` · waiver #${team.waiverPosition}` : '';
   const leagueAvg = t.history.length ? t.history.reduce((a, h) => a + h.points, 0) / t.history.length : undefined;
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow={team.rosterId === myTeamId ? 'Your team' : 'Team'}
         title={<span className="flex items-center gap-3"><TeamAvatar rosterId={team.rosterId} size={40} /><span className="min-w-0 truncate">{team.name}</span></span>}
-        subtitle={`${team.owner} · ${record(team.wins, team.losses, team.ties)} · ${fmt(team.pointsFor)} PF · $${team.faabRemaining} FAAB left`}
+        subtitle={`${team.owner} · ${record(team.wins, team.losses, team.ties)} · ${fmt(team.pointsFor)} PF${acquisition}`}
         right={<Select label="Team" value={team.rosterId} onChange={v => navigate(pathFor(leagueId, 'team', v))} options={boot.teams.map(x => ({ value: x.rosterId, label: x.name }))} className="w-56" />}
       />
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -92,7 +95,7 @@ function TeamView({ t }: { t: TeamPage }) {
         <div className="px-4 pt-4 sm:px-5"><CardHeader title="Roster" subtitle={`${t.roster.length} players`} /></div>
         {byPos.map(g => (
           <div key={g.pos} className="border-t border-line">
-            <div className="eyebrow bg-surface-2 px-4 py-1.5 sm:px-5">{g.pos} · {g.players.length}</div>
+            <div className="eyebrow bg-surface-2 px-4 py-1.5 sm:px-5">{posLabel(g.pos, boot.league.platform)} · {g.players.length}</div>
             <div className="overflow-x-auto scroll-thin">
               <table className="tbl num text-[13px]">
                 <thead className="sr-only"><tr><th>Player</th><th>Slot</th><th>This week</th><th>ROS</th><th>Season</th><th>Value</th><th>Dynasty</th><th>Age</th></tr></thead>
@@ -105,7 +108,7 @@ function TeamView({ t }: { t: TeamPage }) {
                       <td className="r"><span className="text-ink-3">ros </span>{fmt(r.value?.rosAvg)}</td>
                       <td className="r text-ink-2"><span className="text-ink-3">avg </span>{fmt(r.season?.ppg)}</td>
                       <td className="r font-medium"><span className="font-normal text-ink-3">val </span>{fmt(r.value?.value, 0)}</td>
-                      <td className="r text-ink-2"><span className="text-ink-3">dyn </span>{fmt(r.value?.dynasty, 0)}</td>
+                      {boot.league.isDynasty && <td className="r text-ink-2"><span className="text-ink-3">dyn </span>{fmt(r.value?.dynasty, 0)}</td>}
                       <td className="r text-ink-3">{r.age ?? '—'}</td>
                     </tr>
                   ))}

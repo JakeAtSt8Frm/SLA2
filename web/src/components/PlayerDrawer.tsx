@@ -83,7 +83,7 @@ export function PlayerDrawer() {
                   )}
                   <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
                     <div><div className="text-[12px] text-ink-3">Expected</div><div className="num text-[28px] font-semibold leading-tight">{fmt(f.exp)}</div></div>
-                    <div><div className="text-[12px] text-ink-3">If he plays</div><div className="num text-[20px] font-semibold">{fmt(f.mean)}</div></div>
+                    <div><div className="text-[12px] text-ink-3">If active</div><div className="num text-[20px] font-semibold">{fmt(f.mean)}</div></div>
                     <div><div className="text-[12px] text-ink-3">Chance to play</div><div className="num text-[20px] font-semibold">{prob(f.play)}</div></div>
                     <div><div className="text-[12px] text-ink-3">Sleeper projection</div><div className="num text-[20px] font-semibold">{fmt(f.provider)}</div>{f.provider !== null && <Delta value={f.exp - f.provider} className="text-[12px]" />}</div>
                   </div>
@@ -99,6 +99,13 @@ export function PlayerDrawer() {
                   </div>
                 </Card>
               ) : <Card><Empty title="No forecast">This player has no game or projection in the remaining schedule.</Empty></Card>}
+
+              {d.outlook && (
+                <Card>
+                  <div className="eyebrow mb-1.5">ESPN outlook</div>
+                  <p className="text-[13px] leading-relaxed text-ink-2">{d.outlook}</p>
+                </Card>
+              )}
 
               {Object.keys(d.inputs).length > 0 && (
                 <Card>
@@ -141,7 +148,7 @@ export function PlayerDrawer() {
                   <div className="eyebrow mb-2">Value in this league</div>
                   <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
                     <div><div className="text-[12px] text-ink-3">SLA value</div><div className="num text-[18px] font-semibold">{fmt(p.value.value, 0)}</div></div>
-                    <div><div className="text-[12px] text-ink-3">Dynasty</div><div className="num text-[18px] font-semibold">{fmt(p.value.dynasty, 0)}</div></div>
+                    {boot.league.isDynasty && <div><div className="text-[12px] text-ink-3">Dynasty</div><div className="num text-[18px] font-semibold">{fmt(p.value.dynasty, 0)}</div></div>}
                     <div><div className="text-[12px] text-ink-3">ROS / week</div><div className="num text-[18px] font-semibold">{fmt(p.value.rosAvg)}</div></div>
                     <div><div className="text-[12px] text-ink-3">Over waiver level</div><div className="num text-[18px] font-semibold">{signed(p.value.vorp)}</div></div>
                     <div><div className="text-[12px] text-ink-3">Pos rank</div><div className="num text-[18px] font-semibold">{p.pos}{p.value.posRank}</div></div>

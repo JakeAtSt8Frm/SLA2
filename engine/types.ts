@@ -22,6 +22,8 @@ export interface PlayerInfo {
   number: number | null;
   college: string | null;
   newsUpdated: number | null;
+  /** ESPN player id, for leagues hosted on ESPN. */
+  espnId?: string | null;
 }
 
 /** One NFL game in the schedule, joined from nflverse (kickoff/lines) and Sleeper (status). */

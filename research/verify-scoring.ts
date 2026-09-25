@@ -3,12 +3,14 @@
  * reproduce Sleeper's official `players_points` and team totals for every week on record.
  */
 import { sleeper, weekStats } from '../server/sleeper.ts';
-import { compileScoring, round, scoreStats } from '../engine/scoring.ts';
+import { compileScoring, completeStats, round, scoreStats } from '../engine/scoring.ts';
 
 const LEAGUE = process.argv[2] ?? '1312656463549726720';
 
 async function main() {
   const state = await sleeper.state();
+  const players = await sleeper.players();
+  const score = (pid: string, line: Record<string, number>, scoring: [string, number][]) => scoreStats(players[pid] ? completeStats(line, players[pid].pos) : line, scoring);
   let id: string | null = LEAGUE;
   const summary: Record<string, unknown>[] = [];
   while (id) {
@@ -26,7 +28,7 @@ async function main() {
       for (const m of matchups) {
         for (const [pid, official] of Object.entries(m.playersPoints)) {
           const line = byId.get(pid);
-          const ours = line ? scoreStats(line, scoring) : 0;
+          const ours = line ? score(pid, line, scoring) : 0;
           checked++;
           const delta = Math.abs(ours - official);
           maxDelta = Math.max(maxDelta, delta);
@@ -38,7 +40,7 @@ async function main() {
         const starters = m.starters.filter(s => s !== '0');
         if (!starters.length) continue;
         teamChecked++;
-        const total = round(starters.reduce((sum, pid) => sum + (byId.get(pid) ? scoreStats(byId.get(pid)!, scoring) : 0), 0));
+        const total = round(starters.reduce((sum, pid) => sum + (byId.get(pid) ? score(pid, byId.get(pid)!, scoring) : 0), 0));
         const official = m.customPoints ?? m.points;
         if (Math.abs(total - official) > 0.02) teamMismatched++;
       }

@@ -156,7 +156,7 @@ function Swaps({ l }: { l: LineupReady }) {
             <div key={s.startId} className="rounded-[12px] border border-line p-3.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="eyebrow">{slotLabel(s.slot)}</span>
-                <span className="num text-[13px] font-semibold text-good-ink">+{fmt(s.gain)} pts</span>
+                <span className="num text-[13px] font-semibold text-good-ink">{s.gain < 0.05 ? 'toss-up' : `+${fmt(s.gain)} pts`}</span>
               </div>
               <div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                 <div className="min-w-0">

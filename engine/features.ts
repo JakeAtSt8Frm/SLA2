@@ -120,7 +120,7 @@ export class FeatureState {
       if (line.id.startsWith('TEAM_') || !didPlay(line.stats)) continue;
       const m = this.meta(line.id);
       if (!m || m.pos === 'DEF') continue;
-      const s = line.stats;
+      const s = completeStats(line.stats, m.pos);
       const pts = scoreStatsExact(s, this.scoring);
       const idp = IDP.has(m.pos);
       const snaps = idp ? (s.def_snp ?? 0) : m.pos === 'K' ? 0 : (s.off_snp ?? 0);
@@ -140,7 +140,7 @@ export class FeatureState {
         proj: null,
       };
       const projection = projections?.get(line.id);
-      if (projection && hasForecast(projection)) log.proj = scoreStatsExact(completeStats(projection, m.pos), this.scoring);
+      if (projection && hasForecast(projection)) log.proj = scoreStatsExact(completeStats(projection, m.pos, true), this.scoring);
       const list = this.logs.get(line.id) ?? [];
       if (!list.length || list[list.length - 1].abs < abs) list.push(log);
       this.logs.set(line.id, list);
@@ -246,7 +246,7 @@ export class FeatureState {
 
     // Provider projection, rescored with this league's settings.
     if (projection && hasForecast(projection)) {
-      const p = completeStats(projection, pos);
+      const p = completeStats(projection, pos, true);
       x[F.proj_pts] = scoreStatsExact(p, this.scoring);
       x[F.has_proj] = 1;
       x[F.proj_off_pts] = scoreStatsExact(p, this.split.offense);

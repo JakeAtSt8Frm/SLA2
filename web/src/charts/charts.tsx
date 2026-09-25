@@ -3,7 +3,7 @@
  * rounded data-ends, 2px surface gaps, hairline solid grid, hover on every chart, colour by entity.
  */
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { fmt, prob, teamColor } from '../lib/format.ts';
+import { fmt, pairColors, prob, teamColor } from '../lib/format.ts';
 import { useTooltip } from '../components/ui.tsx';
 
 export function useWidth<T extends HTMLElement>(fallback = 600): [React.RefObject<T | null>, number] {
@@ -54,11 +54,12 @@ function TipRow({ color, label, value, line = true }: { color: string; label: Re
 export function WinBar({ a, b, pA, labels = true, height = 8 }: { a: number; b: number | null; pA: number | null; labels?: boolean; height?: number }) {
   if (pA === null || b === null) return <div className="h-2 rounded-full bg-surface-3" />;
   const left = Math.max(0.02, Math.min(0.98, pA));
+  const [colorA, colorB] = pairColors(a, b);
   return (
     <div>
       <div className="flex w-full gap-[2px]" style={{ height }} role="img" aria-label={`Win probability ${prob(pA)} to ${prob(1 - pA)}`}>
-        <div className="rounded-l-full" style={{ width: `${left * 100}%`, background: teamColor(a) }} />
-        <div className="rounded-r-full" style={{ width: `${(1 - left) * 100}%`, background: teamColor(b) }} />
+        <div className="rounded-l-full" style={{ width: `${left * 100}%`, background: colorA }} />
+        <div className="rounded-r-full" style={{ width: `${(1 - left) * 100}%`, background: colorB }} />
       </div>
       {labels && (
         <div className="num mt-1 flex justify-between text-[12px] font-semibold text-ink">
@@ -78,6 +79,7 @@ export function ScoreDistribution({ hist, a, b, nameA, nameB }: {
   const [ref, width] = useWidth<HTMLDivElement>(520);
   const tip = useTooltip();
   const [hover, setHover] = useState<number | null>(null);
+  const [colorA, colorB] = pairColors(a, b);
   const H = 150, pad = { l: 8, r: 8, t: 10, b: 24 };
   const n = hist.a.length;
   const binW = (hist.hi - hist.lo) / n;
@@ -96,8 +98,8 @@ export function ScoreDistribution({ hist, a, b, nameA, nameB }: {
     tip.show(e, (
       <div className="space-y-1">
         <div className="text-ink-3">{fmt(from, 0)}–{fmt(from + binW, 0)} pts</div>
-        <TipRow color={teamColor(a)} label={nameA} value={`${(hist.a[i] * 100).toFixed(1)}%`} />
-        <TipRow color={teamColor(b)} label={nameB} value={`${(hist.b[i] * 100).toFixed(1)}%`} />
+        <TipRow color={colorA} label={nameA} value={`${(hist.a[i] * 100).toFixed(1)}%`} />
+        <TipRow color={colorB} label={nameB} value={`${(hist.b[i] * 100).toFixed(1)}%`} />
       </div>
     ));
   };
@@ -110,18 +112,18 @@ export function ScoreDistribution({ hist, a, b, nameA, nameB }: {
             <text x={x(t)} y={H - 6} textAnchor="middle" className="num" fontSize={11} fill="var(--ink-3)">{fmt(t, 0)}</text>
           </g>
         ))}
-        {[['a', hist.a, a], ['b', hist.b, b]].map(([k, arr, rid]) => (
-          <g key={k as string}>
-            <path d={area(arr as number[])} fill={teamColor(rid as number)} opacity={0.1} />
-            <path d={path(arr as number[])} fill="none" stroke={teamColor(rid as number)} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        {([['a', hist.a, colorA], ['b', hist.b, colorB]] as const).map(([k, arr, color]) => (
+          <g key={k}>
+            <path d={area(arr)} fill={color} opacity={0.1} />
+            <path d={path(arr)} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
           </g>
         ))}
         {hover !== null && <line x1={x(hist.lo + (hover + 0.5) * binW)} x2={x(hist.lo + (hover + 0.5) * binW)} y1={pad.t} y2={y(0)} stroke="var(--ink-3)" strokeWidth={1} />}
         <rect x={0} y={0} width={width} height={H} fill="transparent" onPointerMove={onMove} onPointerLeave={() => { setHover(null); tip.hide(); }} />
       </svg>
       <div className="mt-1 flex flex-wrap gap-4 text-[12px] text-ink-2">
-        <span className="inline-flex items-center gap-1.5"><span className="h-[2px] w-3 rounded" style={{ background: teamColor(a) }} />{nameA}</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-[2px] w-3 rounded" style={{ background: teamColor(b) }} />{nameB}</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-[2px] w-3 rounded" style={{ background: colorA }} />{nameA}</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-[2px] w-3 rounded" style={{ background: colorB }} />{nameB}</span>
       </div>
       {tip.node}
     </div>

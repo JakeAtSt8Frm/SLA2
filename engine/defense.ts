@@ -3,12 +3,13 @@
  * "matchup research" metrics, ported faithfully:
  *   allowed/gm, last 4, ceiling/floor/top-10 rates, volatility, opportunities allowed,
  *   schedule-adjusted allowed (two-way ridge fit) and the 0–100 matchup rating.
- * For IDP groups the "opponent" is the offense the defenders faced.
+ * For IDP groups and team defenses (D/ST) the "opponent" is the offense they faced, so the
+ * table reads "which offenses give defenders the most", the streaming question.
  */
-import { didPlay, scoreStatsExact } from './scoring.ts';
+import { completeStats, didPlay, scoreStatsExact } from './scoring.ts';
 import type { PlayerInfo, Pos, Stats } from './types.ts';
 
-export const DEFENSE_GROUPS: readonly Pos[] = ['QB', 'RB', 'WR', 'TE', 'K', 'DL', 'LB', 'DB'];
+export const DEFENSE_GROUPS: readonly Pos[] = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF', 'DL', 'LB', 'DB'];
 
 export interface DefenseRow {
   team: string;
@@ -43,6 +44,8 @@ function opportunities(group: Pos, s: Stats): number {
     case 'RB': return n('rush_att') + receiving;
     case 'WR': case 'TE': return receiving;
     case 'K': return n('fga') + n('xpa');
+    // Sacks and takeaways the offense gave up.
+    case 'DEF': return n('sack') + n('int') + n('fum_rec');
     default: return n('idp_tkl_solo') + n('idp_tkl_ast') + n('idp_qb_hit') + n('idp_sack') + n('idp_pass_def');
   }
 }
@@ -112,7 +115,7 @@ export function buildDefenseIndex(weeks: readonly WeekInput[], players: Record<s
       if (line.id.startsWith('TEAM_') || !line.opponent || !didPlay(line.stats)) continue;
       const p = players[line.id];
       if (!p || !DEFENSE_GROUPS.includes(p.pos)) continue;
-      rows.push({ group: p.pos, opp: line.opponent, team: line.team, pts: scoreStatsExact(line.stats, scoring), vol: opportunities(p.pos, line.stats) });
+      rows.push({ group: p.pos, opp: line.opponent, team: line.team, pts: scoreStatsExact(completeStats(line.stats, p.pos), scoring), vol: opportunities(p.pos, line.stats) });
     }
     for (const g of DEFENSE_GROUPS) {
       const inGroup = rows.filter(r => r.group === g);

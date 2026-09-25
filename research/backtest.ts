@@ -12,11 +12,19 @@ import { ProjectionModel, type ModelFile } from '../engine/model.ts';
 import { optimizeLineup } from '../engine/optimizer.ts';
 import { starterSlots } from '../engine/positions.ts';
 import { round } from '../engine/scoring.ts';
+import { espnMatchups, isEspnId } from '../server/espn.ts';
+import { modelKey } from '../server/league.ts';
 import { sleeper } from '../server/sleeper.ts';
+import { sourceFor } from '../server/source.ts';
 import { RESEARCH_DIR } from './fetch-history.ts';
 
-const LEAGUE_2025 = '1180280389862244352';
+/** Usage: node research/backtest.ts [leagueId]. The lineup backtest replays that league's 2025 season. */
+const LEAGUE = process.argv[2] ?? '1312656463549726720';
+const KEY = modelKey(LEAGUE);
+const SUFFIX = KEY === 'default' ? '' : `-${KEY}`;
+const LEAGUE_2025 = KEY === 'default' ? '1180280389862244352' : `${KEY}-2025`;
 const MODEL_DIR = path.join(RESEARCH_DIR, '..', 'model');
+const matchupsFor = (week: number) => (isEspnId(LEAGUE_2025) ? espnMatchups(LEAGUE_2025, week, true) : sleeper.matchups(LEAGUE_2025, week, true));
 
 function readCsv(text: string): Record<string, string>[] {
   const [head, ...lines] = text.trim().split('\n');
@@ -28,9 +36,9 @@ function readCsv(text: string): Record<string, string>[] {
 }
 
 async function parity(model: ProjectionModel) {
-  const fixture = readCsv(await readFile(path.join(RESEARCH_DIR, 'parity_fixture.csv'), 'utf8'));
+  const fixture = readCsv(await readFile(path.join(RESEARCH_DIR, `parity_fixture${SUFFIX}.csv`), 'utf8'));
   const wanted = new Map(fixture.map(r => [`${r.season}:${r.week}:${r.player_id}`, Number(r.expected)]));
-  const text = await readFile(path.join(RESEARCH_DIR, 'dataset.csv'), 'utf8');
+  const text = await readFile(path.join(RESEARCH_DIR, `dataset${SUFFIX}.csv`), 'utf8');
   const lines = text.split('\n');
   const header = lines[0].split(',');
   const offset = header.indexOf(FEATURE_NAMES[0]);
@@ -55,14 +63,22 @@ async function parity(model: ProjectionModel) {
 }
 
 async function main() {
-  const file = JSON.parse(await readFile(path.join(MODEL_DIR, 'model.json'), 'utf8')) as ModelFile;
+  const file = JSON.parse(await readFile(path.join(MODEL_DIR, `model${SUFFIX}.json`), 'utf8')) as ModelFile;
   const model = new ProjectionModel(file);
   const parityResult = await parity(model);
+  const reportPath = path.join(MODEL_DIR, `report${SUFFIX}.json`);
 
-  const rows = readCsv(await readFile(path.join(RESEARCH_DIR, 'backtest_2025.csv'), 'utf8'));
+  const league = await sourceFor(LEAGUE_2025).league().catch(() => null);
+  if (!league) {
+    console.log(`no 2025 season for ${LEAGUE}; parity only`);
+    const report = JSON.parse(await readFile(reportPath, 'utf8'));
+    report.lineupBacktest = { parity: parityResult };
+    await writeFile(reportPath, JSON.stringify(report, null, 1));
+    return;
+  }
+  const rows = readCsv(await readFile(path.join(RESEARCH_DIR, `backtest_2025${SUFFIX}.csv`), 'utf8'));
   const byKey = new Map(rows.map(r => [`${r.week}:${r.player_id}`, r]));
   const players = await sleeper.players();
-  const league = await sleeper.league(LEAGUE_2025);
   const slots = starterSlots(league.rosterPositions);
   const status = (code: string) => (code === 'Q' ? 'Questionable' : code === 'D' ? 'Doubtful' : code === 'O' ? 'Out' : null);
 
@@ -71,7 +87,7 @@ async function main() {
   let flips = 0, games = 0;
   const diffsByWeek = new Map<number, number[]>(); // model − provider per team-week
   for (let week = 1; week <= 17; week++) {
-    const matchups = await sleeper.matchups(LEAGUE_2025, week, true);
+    const matchups = await matchupsFor(week);
     const week_ = { week, model: 0, provider: 0, manager: 0, optimal: 0 };
     const results = new Map<number, { model: number; provider: number; manager: number }>();
     for (const m of matchups) {
@@ -94,7 +110,8 @@ async function main() {
       const modelPts = score(optimizeLineup(slots, pool('model')).ids);
       const providerPts = score(optimizeLineup(slots, pool('provider')).ids);
       const optimalPts = optimizeLineup(slots, pool('actual')).total;
-      const managerPts = m.points;
+      // Managers' real lineups, scored with the same (current) rules as the other two.
+      const managerPts = score(m.starters.filter(s => s !== '0'));
       totals.model += modelPts; totals.provider += providerPts; totals.manager += managerPts; totals.optimal += optimalPts; totals.teamWeeks++;
       diffsByWeek.set(week, [...(diffsByWeek.get(week) ?? []), modelPts - providerPts]);
       if (modelPts > providerPts + 1e-9) totals.modelBeatProvider++;
@@ -146,7 +163,6 @@ async function main() {
     parity: parityResult,
   };
   console.log(JSON.stringify({ ...summary, byWeek: undefined }, null, 2));
-  const reportPath = path.join(MODEL_DIR, 'report.json');
   const report = JSON.parse(await readFile(reportPath, 'utf8'));
   report.lineupBacktest = summary;
   await writeFile(reportPath, JSON.stringify(report, null, 1));

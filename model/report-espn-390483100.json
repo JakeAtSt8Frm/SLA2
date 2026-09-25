@@ -1,0 +1,493 @@
+{
+ "meta": {
+  "league": "UK-BG",
+  "key": "espn-390483100",
+  "version": "2026.09.24",
+  "trainedAt": "2026-09-25T03:22:38Z",
+  "trainingRows": 45093,
+  "seasons": [
+   2020,
+   2021,
+   2022,
+   2023,
+   2024,
+   2025,
+   2026
+  ],
+  "params": {
+   "learning_rate": 0.03,
+   "max_leaf_nodes": 7,
+   "min_samples_leaf": 250,
+   "l2_regularization": 5,
+   "monotonic": true
+  },
+  "residualTarget": true,
+  "iterations": 300,
+  "shrink": 0.5
+ },
+ "holdout2025": {
+  "model": {
+   "n": 2304,
+   "mae": 5.699,
+   "rmse": 7.25,
+   "bias": 0.386,
+   "spearman": 0.2464,
+   "pairAcc": 0.6172,
+   "pairs": 33480,
+   "closePairAcc": 0.549,
+   "closePairs": 18434,
+   "byPos": {
+    "QB": {
+     "mae": 6.206,
+     "n": 288,
+     "bias": 0.298,
+     "pairAcc": 0.5477
+    },
+    "RB": {
+     "mae": 6.025,
+     "n": 702,
+     "bias": 0.246,
+     "pairAcc": 0.6507
+    },
+    "WR": {
+     "mae": 6.179,
+     "n": 702,
+     "bias": 0.898,
+     "pairAcc": 0.613
+    },
+    "TE": {
+     "mae": 5.23,
+     "n": 324,
+     "bias": -0.052,
+     "pairAcc": 0.5836
+    },
+    "K": {
+     "mae": 3.749,
+     "n": 288,
+     "bias": 0.061,
+     "pairAcc": 0.5449
+    }
+   }
+  },
+  "provider": {
+   "n": 2304,
+   "mae": 5.724,
+   "rmse": 7.269,
+   "bias": 0.551,
+   "spearman": 0.227,
+   "pairAcc": 0.6157,
+   "pairs": 33480,
+   "closePairAcc": 0.5463,
+   "closePairs": 18434,
+   "byPos": {
+    "QB": {
+     "mae": 6.248,
+     "n": 288,
+     "bias": 0.703,
+     "pairAcc": 0.5509
+    },
+    "RB": {
+     "mae": 6.03,
+     "n": 702,
+     "bias": 0.3,
+     "pairAcc": 0.6507
+    },
+    "WR": {
+     "mae": 6.22,
+     "n": 702,
+     "bias": 1.109,
+     "pairAcc": 0.6142
+    },
+    "TE": {
+     "mae": 5.241,
+     "n": 324,
+     "bias": 0.084,
+     "pairAcc": 0.5884
+    },
+    "K": {
+     "mae": 3.792,
+     "n": 288,
+     "bias": 0.172,
+     "pairAcc": 0.5017
+    }
+   }
+  },
+  "linear": {
+   "n": 2304,
+   "mae": 5.661,
+   "rmse": 7.243,
+   "bias": 0.04,
+   "spearman": 0.227,
+   "pairAcc": 0.6157,
+   "pairs": 33480,
+   "closePairAcc": 0.5463,
+   "closePairs": 18434,
+   "byPos": {
+    "QB": {
+     "mae": 6.252,
+     "n": 288,
+     "bias": -0.448,
+     "pairAcc": 0.5509
+    },
+    "RB": {
+     "mae": 6.006,
+     "n": 702,
+     "bias": 0.187,
+     "pairAcc": 0.6507
+    },
+    "WR": {
+     "mae": 6.098,
+     "n": 702,
+     "bias": 0.5,
+     "pairAcc": 0.6142
+    },
+    "TE": {
+     "mae": 5.147,
+     "n": 324,
+     "bias": -0.506,
+     "pairAcc": 0.5884
+    },
+    "K": {
+     "mae": 3.744,
+     "n": 288,
+     "bias": -0.343,
+     "pairAcc": 0.5017
+    }
+   }
+  },
+  "form": {
+   "n": 2304,
+   "mae": 5.987,
+   "rmse": 7.682,
+   "bias": 0.272,
+   "spearman": 0.1753,
+   "pairAcc": 0.5895,
+   "pairs": 33480,
+   "closePairAcc": 0.5176,
+   "closePairs": 18434,
+   "byPos": {
+    "QB": {
+     "mae": 6.62,
+     "n": 288,
+     "bias": 0.313,
+     "pairAcc": 0.5199
+    },
+    "RB": {
+     "mae": 6.337,
+     "n": 702,
+     "bias": -0.428,
+     "pairAcc": 0.6239
+    },
+    "WR": {
+     "mae": 6.429,
+     "n": 702,
+     "bias": 1.036,
+     "pairAcc": 0.5816
+    },
+    "TE": {
+     "mae": 5.563,
+     "n": 324,
+     "bias": 0.298,
+     "pairAcc": 0.5551
+    },
+    "K": {
+     "mae": 3.898,
+     "n": 288,
+     "bias": 0.042,
+     "pairAcc": 0.5359
+    }
+   }
+  }
+ },
+ "live2026": {
+  "model": {
+   "n": 256,
+   "mae": 6.31,
+   "rmse": 8.083,
+   "bias": 0.09,
+   "spearman": 0.2398,
+   "pairAcc": 0.6379,
+   "pairs": 3720,
+   "closePairAcc": 0.5439,
+   "closePairs": 2166,
+   "byPos": {
+    "QB": {
+     "mae": 7.935,
+     "n": 32,
+     "bias": -0.06,
+     "pairAcc": 0.6333
+    },
+    "RB": {
+     "mae": 5.682,
+     "n": 78,
+     "bias": 0.388,
+     "pairAcc": 0.6728
+    },
+    "WR": {
+     "mae": 7.269,
+     "n": 78,
+     "bias": 0.073,
+     "pairAcc": 0.661
+    },
+    "TE": {
+     "mae": 6.213,
+     "n": 36,
+     "bias": -0.917,
+     "pairAcc": 0.5541
+    },
+    "K": {
+     "mae": 3.989,
+     "n": 32,
+     "bias": 0.687,
+     "pairAcc": 0.371
+    }
+   }
+  },
+  "provider": {
+   "n": 256,
+   "mae": 6.393,
+   "rmse": 8.101,
+   "bias": 0.387,
+   "spearman": 0.2389,
+   "pairAcc": 0.6414,
+   "pairs": 3720,
+   "closePairAcc": 0.5499,
+   "closePairs": 2166,
+   "byPos": {
+    "QB": {
+     "mae": 8.22,
+     "n": 32,
+     "bias": 0.492,
+     "pairAcc": 0.6125
+    },
+    "RB": {
+     "mae": 5.66,
+     "n": 78,
+     "bias": 0.496,
+     "pairAcc": 0.6789
+    },
+    "WR": {
+     "mae": 7.422,
+     "n": 78,
+     "bias": 0.526,
+     "pairAcc": 0.6563
+    },
+    "TE": {
+     "mae": 6.284,
+     "n": 36,
+     "bias": -0.552,
+     "pairAcc": 0.5869
+    },
+    "K": {
+     "mae": 3.971,
+     "n": 32,
+     "bias": 0.732,
+     "pairAcc": 0.3982
+    }
+   }
+  },
+  "linear": {
+   "n": 256,
+   "mae": 6.309,
+   "rmse": 8.122,
+   "bias": -0.124,
+   "spearman": 0.2389,
+   "pairAcc": 0.6414,
+   "pairs": 3720,
+   "closePairAcc": 0.5499,
+   "closePairs": 2166,
+   "byPos": {
+    "QB": {
+     "mae": 8.054,
+     "n": 32,
+     "bias": -0.567,
+     "pairAcc": 0.6125
+    },
+    "RB": {
+     "mae": 5.636,
+     "n": 78,
+     "bias": 0.303,
+     "pairAcc": 0.6789
+    },
+    "WR": {
+     "mae": 7.293,
+     "n": 78,
+     "bias": -0.139,
+     "pairAcc": 0.6563
+    },
+    "TE": {
+     "mae": 6.263,
+     "n": 36,
+     "bias": -1.06,
+     "pairAcc": 0.5869
+    },
+    "K": {
+     "mae": 3.857,
+     "n": 32,
+     "bias": 0.369,
+     "pairAcc": 0.3982
+    }
+   }
+  },
+  "form": {
+   "n": 256,
+   "mae": 6.687,
+   "rmse": 8.615,
+   "bias": 0.053,
+   "spearman": 0.0976,
+   "pairAcc": 0.5989,
+   "pairs": 3720,
+   "closePairAcc": 0.5134,
+   "closePairs": 2166,
+   "byPos": {
+    "QB": {
+     "mae": 8.039,
+     "n": 32,
+     "bias": 0.187,
+     "pairAcc": 0.5167
+    },
+    "RB": {
+     "mae": 6.172,
+     "n": 78,
+     "bias": 0.075,
+     "pairAcc": 0.6545
+    },
+    "WR": {
+     "mae": 7.309,
+     "n": 78,
+     "bias": -0.4,
+     "pairAcc": 0.6116
+    },
+    "TE": {
+     "mae": 6.998,
+     "n": 36,
+     "bias": -0.267,
+     "pairAcc": 0.4393
+    },
+    "K": {
+     "mae": 4.719,
+     "n": 32,
+     "bias": 1.33,
+     "pairAcc": 0.4525
+    }
+   }
+  }
+ },
+ "maeDeltaCI2025": [
+  -0.054,
+  0.001
+ ],
+ "coverage80": {
+  "QB": 0.779,
+  "RB": 0.7756,
+  "WR": 0.8023,
+  "TE": 0.7769,
+  "K": 0.8078
+ },
+ "availability": {
+  "none": 0.9872,
+  "Questionable": 0.6741,
+  "Doubtful": 0.0092,
+  "Out": 0,
+  "n": {
+   "Out": 5219,
+   "Questionable": 7082,
+   "Doubtful": 761
+  }
+ },
+ "importance": [
+  {
+   "feature": "proj_pts",
+   "share": 0.1419
+  },
+  {
+   "feature": "gap_ewma",
+   "share": 0.1121
+  },
+  {
+   "feature": "max_l16",
+   "share": 0.054
+  },
+  {
+   "feature": "snap_l1",
+   "share": 0.0531
+  },
+  {
+   "feature": "opp_ratio",
+   "share": 0.0529
+  },
+  {
+   "feature": "proj_opps",
+   "share": 0.051
+  },
+  {
+   "feature": "tgt_l4",
+   "share": 0.0509
+  },
+  {
+   "feature": "pass_att_l4",
+   "share": 0.0402
+  },
+  {
+   "feature": "team_plays_ratio",
+   "share": 0.0387
+  },
+  {
+   "feature": "mean_prev",
+   "share": 0.0333
+  },
+  {
+   "feature": "proj_resid",
+   "share": 0.0311
+  },
+  {
+   "feature": "proj_pass_att",
+   "share": 0.0288
+  },
+  {
+   "feature": "proj_vs_form",
+   "share": 0.0255
+  },
+  {
+   "feature": "weeks_since",
+   "share": 0.0253
+  },
+  {
+   "feature": "total",
+   "share": 0.0237
+  },
+  {
+   "feature": "opp_plays_ratio",
+   "share": 0.0233
+  },
+  {
+   "feature": "snaps_l4",
+   "share": 0.0195
+  },
+  {
+   "feature": "gap_l16",
+   "share": 0.0173
+  },
+  {
+   "feature": "implied",
+   "share": 0.0168
+  },
+  {
+   "feature": "dome",
+   "share": 0.016
+  }
+ ],
+ "cohort": {
+  "QB": 16,
+  "RB": 39,
+  "WR": 39,
+  "TE": 18,
+  "K": 16
+ },
+ "lineupBacktest": {
+  "parity": {
+   "checked": 400,
+   "maxDiff": 0.000006728422203394757
+  }
+ }
+}

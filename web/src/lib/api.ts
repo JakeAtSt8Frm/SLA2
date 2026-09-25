@@ -81,14 +81,17 @@ export const useRecap = (id: string) => useQuery({ queryKey: ['recap', id], quer
 export const useHistory = (id: string) => useQuery({ queryKey: ['history', id], queryFn: () => request<History>(`${base(id)}/history`), staleTime: 30 * MIN });
 export const useTransactions = (id: string) => useQuery({ queryKey: ['transactions', id], queryFn: () => request<Transactions>(`${base(id)}/transactions`), staleTime: 2 * MIN });
 export const useDefense = (id: string, season?: number) => useQuery({ queryKey: ['defense', id, season ?? 'default'], queryFn: () => request<Defense>(`${base(id)}/defense${season ? `?season=${season}` : ''}`), staleTime: 10 * MIN, placeholderData: prev => prev });
-export const useModel = () => useQuery({ queryKey: ['model'], queryFn: () => request<ModelReport>('/api/model'), staleTime: 30 * MIN });
+export const useModel = (id: string) => useQuery({ queryKey: ['model', id], queryFn: () => request<ModelReport>(`${base(id)}/model`), staleTime: 30 * MIN });
+export type ConfiguredLeague = Awaited<ReturnType<typeof V.configuredLeagues>>[number];
+export const useLeagues = () => useQuery({ queryKey: ['leagues'], queryFn: () => request<ConfiguredLeague[]>('/api/leagues'), staleTime: 30 * MIN });
 export const useTracking = (id: string) => useQuery({ queryKey: ['tracking', id], queryFn: () => request<Tracking>(`${base(id)}/tracking`), staleTime: 10 * MIN });
 export const useTrade = (id: string) => useMutation({ mutationFn: (body: { a: number; b: number; aGives: string[]; bGives: string[] }) => request<Trade>(`${base(id)}/trade`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });
 export const searchLeagues = (username: string) => request<LeagueSearchResult>(`/api/users/${encodeURIComponent(username)}/leagues`);
 
 export interface Metrics { n: number; mae: number; rmse: number; bias: number; spearman: number; pairAcc: number; pairs: number; closePairAcc: number; closePairs: number; byPos: Record<string, { mae: number; n: number; bias: number; pairAcc: number }> }
 export interface ModelReport {
-  meta: { version: string; trainedAt: string; trainingRows: number; seasons: number[]; params: Record<string, number>; iterations: number };
+  key: string;
+  meta: { league?: string | null; key?: string; version: string; trainedAt: string; trainingRows: number; seasons: number[]; params: Record<string, number>; iterations: number };
   holdout2025: Record<'model' | 'provider' | 'linear' | 'form', Metrics>;
   live2026: Record<'model' | 'provider' | 'linear' | 'form', Metrics> | null;
   maeDeltaCI2025: [number, number];

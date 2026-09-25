@@ -4,6 +4,7 @@
  */
 import { FEATURE_NAMES, gameContext, type FeatureState } from './features.ts';
 import { mixtureQuantile, type Outcome } from './distribution.ts';
+import type { DefenseModel } from './dst.ts';
 import type { ProjectionModel } from './model.ts';
 import { completeStats, hasForecast, scoreStatsExact } from './scoring.ts';
 import type { NflGame, PlayerInfo, Stats } from './types.ts';
@@ -43,6 +44,8 @@ export interface ForecastEnv {
   /** Live stat lines and game status for the current week. */
   liveStats?: ReadonlyMap<string, Stats>;
   gameStatus?: (team: string, week: number) => 'pre_game' | 'in_game' | 'complete' | undefined;
+  /** Team defenses (leagues with a D/ST slot). */
+  defense?: DefenseModel | null;
   now: number;
 }
 
@@ -84,24 +87,26 @@ export function forecastPlayer(env: ForecastEnv, id: string, week: number): Week
   if (!game) return empty({ bye: true });
   const ctx = gameContext(game, team);
   const stats = projection && hasForecast(projection.stats) ? projection.stats : undefined;
-  const x = env.state.features(id, env.season, week, stats, ctx, team);
-  const mean = Math.max(0, env.model.predict(x));
-  const provider = stats ? scoreStatsExact(completeStats(stats, p.pos), env.scoring) : null;
+  const provider = stats ? scoreStatsExact(completeStats(stats, p.pos, true), env.scoring) : null;
+  const defense = p.pos === 'DEF';
+  // A team defense always takes the field; its forecast is the rescored projection (engine/dst.ts).
+  const mean = defense ? provider ?? env.defense?.fallback ?? 0 : Math.max(0, env.model.predict(env.state.features(id, env.season, week, stats, ctx, team)));
 
   const baseNone = env.model.playProbability(null, true);
   let play: number;
-  if (!p.team) play = 0;
+  if (defense) play = 1;
+  else if (!p.team) play = 0;
   else if (week === env.currentWeek) play = env.model.playProbability(p.injuryStatus, true);
   else play = SIDELINED.has(p.injuryStatus ?? '') || p.injuryStatus ? futurePlayProbability(baseNone, p.injuryStatus, week - env.currentWeek) : baseNone;
-  if (!stats) play *= NO_PROJECTION_PLAY_FACTOR;
+  if (!stats && !defense) play *= NO_PROJECTION_PLAY_FACTOR;
 
-  let residuals = env.model.quantiles(p.pos, mean);
+  let residuals = defense ? env.defense?.residuals ?? new Array(21).fill(0) : env.model.quantiles(p.pos, mean);
   let outcomeMean = mean;
   let live: WeekForecast['live'] = null;
   if (week === env.currentWeek && env.gameStatus) {
     const status = env.gameStatus(team, week) ?? ((game.kickoff ?? Infinity) <= env.now ? 'in_game' : 'pre_game');
     const line = env.liveStats?.get(id);
-    const points = line ? scoreStatsExact(line, env.scoring) : 0;
+    const points = line ? scoreStatsExact(completeStats(line, p.pos), env.scoring) : 0;
     if (status === 'complete') {
       live = { status, points };
       play = 1;
@@ -109,8 +114,9 @@ export function forecastPlayer(env: ForecastEnv, id: string, week: number): Week
       residuals = new Array(21).fill(0);
     } else if (status === 'in_game') {
       live = { status, points };
-      // Without a game clock, assume roughly half the game remains.
-      const remaining = 0.5;
+      // No game clock in the feed: estimate what's left from wall-clock time (a broadcast runs ≈185 min).
+      const elapsed = game.kickoff ? (env.now - game.kickoff) / 60_000 : 90;
+      const remaining = Math.min(1, Math.max(0.03, 1 - elapsed / 185));
       const playing = line ? 1 : play;
       play = 1;
       outcomeMean = points + mean * remaining * playing;
@@ -131,7 +137,7 @@ export const outcomeOf = (f: WeekForecast): Outcome => ({ mean: f.mean, play: f.
 /** Model inputs for one player-week, labelled — used to explain a forecast. */
 export function explainInputs(env: ForecastEnv, id: string, week: number): Record<string, number | null> {
   const p = env.players[id];
-  if (!p) return {};
+  if (!p || p.pos === 'DEF') return {};
   const projection = env.projections(week)?.get(id);
   const team = projection?.team ?? p.team;
   const game = team ? env.gameFor(team, week) : undefined;

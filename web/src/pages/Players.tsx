@@ -2,7 +2,7 @@ import { useDeferredValue, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { usePlayers } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
-import { fmt, pct, POSITIONS } from '../lib/format.ts';
+import { fmt, pct, posLabel } from '../lib/format.ts';
 import { Sparkline } from '../charts/charts.tsx';
 import { Button, Card, Delta, Empty, ErrorState, InfoTip, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Segmented, Select, TeamLink, useSort } from '../components/ui.tsx';
 
@@ -36,7 +36,7 @@ export default function PlayersPage() {
           <span className="sr-only">Search players</span>
           <input value={text} onChange={e => { setText(e.target.value); setLimit(100); }} placeholder="Search name or NFL team" className="h-9 w-full rounded-[9px] border border-line-strong bg-surface pl-9 pr-3 text-[14px] placeholder:text-ink-3" />
         </label>
-        <Segmented label="Position" value={pos} onChange={v => { setPos(v); setLimit(100); }} options={['ALL', ...POSITIONS].map(p => ({ value: p, label: p }))} />
+        <Segmented label="Position" value={pos} onChange={v => { setPos(v); setLimit(100); }} options={['ALL', ...boot.league.positions].map(p => ({ value: p, label: posLabel(p, boot.league.platform) }))} />
         <Select<Avail> label="Availability" value={activeAvail} onChange={v => { setAvail(v); setLimit(100); }} options={[{ value: 'all', label: 'All players' }, { value: 'fa', label: 'Free agents' }, { value: 'rostered', label: 'Rostered' }, ...(myTeamId !== null ? [{ value: 'mine' as Avail, label: 'My team' }] : [])]} className="w-40" />
       </div>
       <Card pad={false}>
@@ -56,7 +56,7 @@ export default function PlayersPage() {
                   {header('snap', 'Snap%', 'r')}
                   {header('vorp', <span className="inline-flex items-center gap-1">+Waiver <InfoTip>Points per week above the best free agents at the position.</InfoTip></span>, 'r')}
                   {header('value', 'Value', 'r')}
-                  {header('dynasty', 'Dynasty', 'r')}
+                  {boot.league.isDynasty && header('dynasty', 'Dynasty', 'r')}
                   {header('age', 'Age', 'r')}
                 </tr>
               </thead>
@@ -74,7 +74,7 @@ export default function PlayersPage() {
                     <td className="r text-ink-2">{r.season?.snap !== null && r.season?.snap !== undefined ? pct(r.season.snap) : '—'}</td>
                     <td className="r"><Delta value={r.value?.vorp ?? null} /></td>
                     <td className="r font-medium">{fmt(r.value?.value, 0)}</td>
-                    <td className="r text-ink-2">{fmt(r.value?.dynasty, 0)}</td>
+                    {boot.league.isDynasty && <td className="r text-ink-2">{fmt(r.value?.dynasty, 0)}</td>}
                     <td className="r text-ink-2">{r.age ?? '—'}</td>
                   </tr>
                 ))}

@@ -1,9 +1,10 @@
 /** JSON views over the league core. Everything returned here is what the web app renders. */
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { memo, HOUR } from './cache.ts';
-import { getCore, MODEL_DIR, onCoreBuilt, playoffShape, type LeagueCore } from './league.ts';
+import { getCore, modelFor, onCoreBuilt, playoffShape, type LeagueCore } from './league.ts';
 import { sleeper, type SleeperMatchup } from './sleeper.ts';
+import { sourceFor } from './source.ts';
+import { configuredEspnLeagues } from './espn.ts';
 import { explainInputs, outcomeOf, type WeekForecast } from '../engine/forecast.ts';
 import { exceedProbability, normalCdf } from '../engine/distribution.ts';
 import { bestLineup, lineupStats } from '../engine/lineup.ts';
@@ -14,8 +15,8 @@ import { simulateMatchup, simulateSeason, type TeamWeekDist } from '../engine/si
 import { analyzeTradeSide } from '../engine/trade.ts';
 import { waiverRecommendations } from '../engine/waivers.ts';
 import { buildDefenseIndex, type DefenseRow } from '../engine/defense.ts';
-import { starterSlots } from '../engine/positions.ts';
-import type { Stats } from '../engine/types.ts';
+import { canFill, starterSlots } from '../engine/positions.ts';
+import type { Pos, Stats } from '../engine/types.ts';
 
 const r1 = (n: number) => round(n, 1);
 const SEASON_SIMS = 12000;
@@ -45,7 +46,7 @@ function seasonLines(core: LeagueCore): Map<string, SeasonLine> {
         if (!didPlay(line.stats) || !core.players[id]) continue;
         const s = out.get(id) ?? { gp: 0, total: 0, ppg: 0, last3: 0, snap: null, weeks: [], totalRank: null, ppgRank: null };
         s.gp++;
-        const pts = scoreStats(line.stats, scoring);
+        const pts = scoreStats(completeStats(line.stats, core.players[id].pos), scoring);
         s.total += pts;
         s.weeks.push({ week: w, pts });
         out.set(id, s);
@@ -121,6 +122,7 @@ function teamView(core: LeagueCore, rosterId: number) {
     wins: t.roster.wins, losses: t.roster.losses, ties: t.roster.ties,
     pointsFor: r2(t.roster.pointsFor), pointsAgainst: r2(t.roster.pointsAgainst),
     faabRemaining: Math.max(0, core.league.waiverBudget - t.roster.faabUsed),
+    waiverPosition: t.roster.waiverPosition || null,
     streak: s?.streak ?? '',
   };
 }
@@ -198,9 +200,15 @@ export async function bootstrap(id: string) {
       scoring: Object.fromEntries(nonzero),
       reserveSlots: core.league.reserveSlots ?? 0,
       taxiSlots: core.league.taxiSlots ?? 0,
+      platform: core.platform,
+      /** How free agents are claimed: blind FAAB bids, rolling waiver priority, or first come first served. */
+      waiverMode: core.league.waiverBudget > 0 ? 'faab' : core.platform === 'espn' && core.teams.every(t => !t.roster.waiverPosition) ? 'free' : 'priority',
+      /** Positions that can be started in this league, in display order. */
+      positions: ['QB', 'RB', 'WR', 'TE', 'K', 'DEF', 'DL', 'LB', 'DB'].filter(pos => core.slots.some(slot => canFill([pos as Pos], slot))),
     },
     teams: core.teams.map(t => teamView(core, t.rosterId)),
-    model: modelMeta(),
+    myRosterId: core.myRosterId,
+    model: modelMeta(core.id),
     generatedAt: core.generatedAt,
     warnings: core.warnings,
   };
@@ -252,7 +260,7 @@ function weekRecap(core: LeagueCore, rows: TeamWeek[]) {
 export async function matchups(id: string, requestedWeek?: number) {
   const core = await getCore(id);
   const week = requestedWeek ?? core.week ?? core.lastScored;
-  const ms = core.schedule.get(week) ?? (await sleeper.matchups(id, week).catch(() => []));
+  const ms = core.schedule.get(week) ?? (await sourceFor(id).matchups(week).catch(() => []));
   const isPast = week <= core.lastScored;
   const isCurrent = week === core.week;
   const forecasts = core.forecasts.get(week);
@@ -425,7 +433,8 @@ export async function waivers(id: string, rosterId: number) {
       freeAgents,
       otherRosters: core.teams.filter(x => x.rosterId !== rosterId).map(x => x.roster.players.filter(pid => !core.taxiOrIr.has(pid))),
       faabRemaining: Math.max(0, core.league.waiverBudget - t.roster.faabUsed),
-      dynasty: new Map([...core.values].map(([pid, v]) => [pid, v.dynasty])),
+      // Redraft rosters reset every year: a drop only costs what the player adds this season.
+      dynasty: core.league.isDynasty ? new Map([...core.values].map(([pid, v]) => [pid, v.dynasty])) : new Map(),
       trending: core.trending,
       isLocked: core.isLocked,
       limit: 30,
@@ -530,16 +539,17 @@ export async function player(id: string, playerId: string) {
       const st = line.stats;
       const idp = ['DL', 'LB', 'DB'].includes(p.pos);
       const snaps = idp ? st.def_snp : st.off_snp, teamSnaps = idp ? st.tm_def_snp : st.tm_off_snp;
-      const cats = categoryPoints(st, scoring);
+      const full = completeStats(st, p.pos);
+      const cats = categoryPoints(full, scoring);
       return [{
-        season, week, opp: line.opponent, pts: r2(scoreStats(st, scoring)), snapShare: snaps && teamSnaps ? pct(snaps / teamSnaps) : null,
+        season, week, opp: line.opponent, pts: r2(scoreStats(full, scoring)), snapShare: snaps && teamSnaps ? pct(snaps / teamSnaps) : null,
         categories: Object.fromEntries(Object.entries(cats).map(([k, v]) => [k, r2(v ?? 0)])),
-        stats: Object.fromEntries(scoreBreakdown(st, scoring).map(b => [b.key, b.stat])),
+        stats: Object.fromEntries(scoreBreakdown(full, scoring).map(b => [b.key, b.stat])),
       }];
     });
   const current = core.week !== null ? core.forecasts.get(core.week)?.get(playerId) : undefined;
   const projLine = core.week !== null ? core.projectionsByWeek.get(core.week)?.get(playerId) : undefined;
-  const projStats = projLine && hasForecast(projLine.stats) ? completeStats(projLine.stats, p.pos) : null;
+  const projStats = projLine && hasForecast(projLine.stats) ? completeStats(projLine.stats, p.pos, true) : null;
   const upcoming = core.horizon.map(w => forecastView(core.forecasts.get(w)?.get(playerId))).filter(Boolean);
   const quantiles = current ? Array.from({ length: 21 }, (_, i) => r1(current.mean + current.residuals[i])) : null;
   return {
@@ -548,6 +558,8 @@ export async function player(id: string, playerId: string) {
     gameLog: [...log(core.statsByWeek as never, core.season), ...log(core.prevStatsByWeek as never, core.season - 1)].sort((a, b) => b.season - a.season || b.week - a.week),
     projection: projStats ? { breakdown: scoreBreakdown(projStats, scoring).map(b => ({ ...b, stat: r2(b.stat), points: r2(b.points) })), total: r2(scoreStats(projStats, scoring)) } : null,
     inputs: core.week !== null ? explainInputs(core.env, playerId, core.week) : {},
+    /** ESPN's weekly outlook, in ESPN leagues. */
+    outlook: core.outlooks.get(playerId) ?? null,
     quantiles,
     upcoming,
     labels: STAT_LABELS,
@@ -646,25 +658,25 @@ export async function history(id: string) {
     const seasons: {
       season: number; leagueId: string; name: string; complete: boolean;
       teams: { ownerId: string | null; rosterId: number; name: string; owner: string; wins: number; losses: number; ties: number; pointsFor: number; pointsAgainst: number; finish: number | null }[];
-      champion: string | null; runnerUp: string | null; games: { week: number; a: string | null; b: string | null; aPts: number; bPts: number; playoff: boolean }[];
+      champion: string | null; runnerUp: string | null; games: { week: number; a: string | null; b: string | null; aPts: number; bPts: number; playoff: boolean; span: number }[];
       highs: { owner: string | null; points: number; week: number }[];
     }[] = [];
     let leagueId: string | null = id;
     const state = await sleeper.state();
     while (leagueId && seasons.length < 12) {
-      const lg = await sleeper.league(leagueId);
+      const src = sourceFor(leagueId);
+      const lg = await src.league().catch(() => null);
+      if (!lg) break;
       const complete = lg.season < state.season || lg.status === 'complete';
-      const [users, rosters] = await Promise.all([sleeper.users(leagueId), sleeper.rosters(leagueId)]);
+      const [users, rosters] = await Promise.all([src.users(), src.rosters()]);
       const lastWeek = complete ? Math.min(18, lg.playoffWeekStart + 3) : Math.max(0, lg.lastScoredWeek);
-      const weeks = await Promise.all(Array.from({ length: lastWeek }, (_, i) => sleeper.matchups(leagueId!, i + 1, complete).catch(() => [])));
-      const bracket = complete ? await sleeper.winnersBracket(leagueId, true).catch(() => []) : [];
+      const weeks = await Promise.all(Array.from({ length: lastWeek }, (_, i) => src.matchups(i + 1, complete).catch(() => [])));
+      const finish = complete ? await src.finalPlaces(true).catch(() => new Map<number, number>()) : new Map<number, number>();
       const ownerOfRoster = new Map(rosters.map(r => [r.rosterId, r.ownerId]));
       const nameOf = (rid: number) => {
         const u = users.find(x => x.userId === ownerOfRoster.get(rid));
         return { name: u?.teamName ?? u?.displayName ?? `Team ${rid}`, owner: u?.displayName ?? 'Open team' };
       };
-      const finish = new Map<number, number>();
-      for (const m of bracket) if (m.place !== null && m.winner !== null && m.loser !== null) { finish.set(m.winner, m.place); finish.set(m.loser, m.place + 1); }
       const games: (typeof seasons)[number]['games'] = [];
       const highs: (typeof seasons)[number]['highs'] = [];
       weeks.forEach((ms, i) => {
@@ -673,7 +685,9 @@ export async function history(id: string) {
           if (!b) continue;
           const aPts = a.customPoints ?? a.points, bPts = b.customPoints ?? b.points;
           if (!aPts && !bPts) continue;
-          games.push({ week: w, a: ownerOfRoster.get(a.rosterId) ?? null, b: ownerOfRoster.get(b.rosterId) ?? null, aPts: r2(aPts), bPts: r2(bPts), playoff: w >= lg.playoffWeekStart });
+          const playoff = w >= lg.playoffWeekStart;
+          // Two-week playoff rounds report a two-week total; records compare single weeks only.
+          games.push({ week: w, a: ownerOfRoster.get(a.rosterId) ?? null, b: ownerOfRoster.get(b.rosterId) ?? null, aPts: r2(aPts), bPts: r2(bPts), playoff, span: playoff && lg.playoffRoundType === 2 ? 2 : 1 });
         }
         for (const m of ms) if (w < lg.playoffWeekStart && (m.customPoints ?? m.points) > 0) highs.push({ owner: ownerOfRoster.get(m.rosterId) ?? null, points: r2(m.customPoints ?? m.points), week: w });
       });
@@ -707,7 +721,7 @@ export async function history(id: string) {
       const rec = (x: string, y: string) => ((h2h[x] ??= {})[y] ??= { w: 0, l: 0, t: 0 });
       if (g.aPts > g.bPts) { rec(g.a, g.b).w++; rec(g.b, g.a).l++; } else if (g.aPts < g.bPts) { rec(g.a, g.b).l++; rec(g.b, g.a).w++; } else { rec(g.a, g.b).t++; rec(g.b, g.a).t++; }
     }
-    const allGames = seasons.flatMap(s => s.games.map(g => ({ ...g, season: s.season })));
+    const allGames = seasons.flatMap(s => s.games.filter(g => g.span === 1).map(g => ({ ...g, season: s.season })));
     const records = {
       highScore: allGames.flatMap(g => [{ owner: g.a, points: g.aPts, season: g.season, week: g.week }, { owner: g.b, points: g.bPts, season: g.season, week: g.week }]).sort((a, b) => b.points - a.points).slice(0, 5),
       lowScore: allGames.flatMap(g => [{ owner: g.a, points: g.aPts, season: g.season, week: g.week }, { owner: g.b, points: g.bPts, season: g.season, week: g.week }]).filter(x => x.points > 0).sort((a, b) => a.points - b.points).slice(0, 5),
@@ -725,20 +739,20 @@ export async function history(id: string) {
 
 // ─── Model report & prospective tracking ─────────────────────────────────────
 
-let reportCache: { mtime: number; data: unknown } | null = null;
-export function modelMeta(): { meta: { version: string; trainedAt: string; trainingRows: number } | null } {
-  const report = model() as { meta?: { version: string; trainedAt: string; trainingRows: number } };
-  return { meta: report.meta ? { version: report.meta.version, trainedAt: report.meta.trainedAt, trainingRows: report.meta.trainingRows } : null };
+const reports = new Map<string, Record<string, unknown>>();
+export function modelMeta(leagueId = 'default'): { key: string; meta: { version: string; trainedAt: string; trainingRows: number } | null } {
+  const report = model(leagueId) as { meta?: { version: string; trainedAt: string; trainingRows: number } };
+  return { key: modelFor(leagueId).key, meta: report.meta ? { version: report.meta.version, trainedAt: report.meta.trainedAt, trainingRows: report.meta.trainingRows } : null };
 }
-export function model() {
-  try {
-    const file = path.join(MODEL_DIR, 'report.json');
-    const text = readFileSync(file, 'utf8');
-    if (!reportCache || reportCache.data === null) reportCache = { mtime: Date.now(), data: JSON.parse(text) };
-    return reportCache.data as Record<string, unknown>;
-  } catch {
-    return {};
+/** The evaluation report of the model serving a league (each league is scored and trained separately). */
+export function model(leagueId = 'default') {
+  const { key, reportFile } = modelFor(leagueId);
+  let data = reports.get(key);
+  if (!data) {
+    try { data = JSON.parse(readFileSync(reportFile, 'utf8')) as Record<string, unknown>; } catch { data = {}; }
+    reports.set(key, data);
   }
+  return { ...data, key };
 }
 
 export class HttpError extends Error {
@@ -799,3 +813,20 @@ onCoreBuilt(core => {
     }
   })();
 });
+
+// ─── Configured leagues (league switcher) ────────────────────────────────────
+
+/** Every league this deployment is set up for, with display names. Credentials never leave the server. */
+export async function configuredLeagues(defaultLeague: string) {
+  const ids = [...new Set([defaultLeague, ...(process.env.SLA_LEAGUES ?? '').split(',').map(x => x.trim()).filter(Boolean)])];
+  const entries = [...ids.map(id => ({ id, name: '', platform: 'sleeper' as const })), ...configuredEspnLeagues()];
+  const out = await Promise.all(entries.map(async e => {
+    try {
+      const lg = await sourceFor(e.id).league();
+      return { id: e.id, name: lg.name || e.name, platform: e.platform, season: lg.season, teams: lg.totalRosters, dynasty: lg.isDynasty };
+    } catch {
+      return e.name ? { id: e.id, name: e.name, platform: e.platform, season: null, teams: null, dynasty: false } : null;
+    }
+  }));
+  return out.filter(x => x !== null);
+}

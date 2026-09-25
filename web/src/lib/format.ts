@@ -38,11 +38,37 @@ export function ago(iso: string | number | null | undefined): string {
   return `${Math.round(s / 86400)} d ago`;
 }
 
-/** Team colour follows the team (roster id), never its rank. */
-export const teamColor = (rosterId: number | null | undefined) => (rosterId ? `var(--team-${((rosterId - 1) % 8) + 1})` : 'var(--ink-3)');
+/**
+ * Team colour follows the team (its place in the league's team list), never its rank.
+ * ESPN team ids have gaps (1, 2, 3, 6, 9…), so ids are mapped to their order first.
+ */
+let teamOrder = new Map<number, number>();
+export function setTeamOrder(rosterIds: readonly number[]) {
+  teamOrder = new Map([...rosterIds].sort((a, b) => a - b).map((id, i) => [id, i]));
+}
+const slotOf = (rosterId: number) => ((teamOrder.get(rosterId) ?? rosterId - 1) % 8) + 1;
+export const teamColor = (rosterId: number | null | undefined) => (rosterId ? `var(--team-${slotOf(rosterId)})` : 'var(--ink-3)');
+
+/** Palette slots that read as the same hue family side by side (orange/pink/red, the two greens). */
+const HUE_FAMILY: Record<number, string> = { 1: 'blue', 2: 'warm', 3: 'green', 4: 'yellow', 5: 'warm', 6: 'green', 7: 'violet', 8: 'warm' };
+/**
+ * Colours for a head-to-head view. Each team keeps its colour unless the pair would be hard
+ * to tell apart, in which case the second team borrows the nearest contrasting palette colour.
+ */
+export function pairColors(a: number, b: number | null): [string, string] {
+  const ca = teamColor(a);
+  if (b === null) return [ca, 'var(--ink-3)'];
+  const sa = slotOf(a), sb = slotOf(b);
+  if (HUE_FAMILY[sa] !== HUE_FAMILY[sb]) return [ca, teamColor(b)];
+  const alt = [1, 7, 4, 3].find(s => HUE_FAMILY[s] !== HUE_FAMILY[sa])!;
+  return [ca, `var(--team-${alt})`];
+}
 
 export const SLOT_LABEL: Record<string, string> = { SUPER_FLEX: 'SF', FLEX: 'FLEX', WRRB_FLEX: 'W/R', REC_FLEX: 'W/T', IDP_FLEX: 'IDP' };
-export const slotLabel = (s: string) => SLOT_LABEL[s] ?? s;
+/** Platform of the league on screen, so labels follow its vocabulary (ESPN says D/ST, Sleeper DEF). */
+let platform: string | undefined;
+export function setPlatform(p: string | undefined) { platform = p; }
+export const slotLabel = (s: string) => (s === 'DEF' && platform === 'espn' ? 'D/ST' : SLOT_LABEL[s] ?? s);
 
 export const FEATURE_LABELS: Record<string, string> = {
   proj_pts: 'Provider projection (league scoring)', mean_cur: 'Season average', ewma: 'Recent-weighted average', mean_l4: 'Last 4 games',
@@ -57,8 +83,11 @@ export const FEATURE_LABELS: Record<string, string> = {
   tkl_rate: 'Tackle points per snap', big_pts_l16: 'Big-play points per game', fga_l8: 'Kick attempts per game', proj_resid_n: 'Games vs projection',
   n_cur: 'Games this season', n_l16: 'Games in last 16', tgt_l4: 'Targets (last 4)', carry_l4: 'Carries (last 4)', pass_att_l4: 'Pass attempts (last 4)',
   home: 'Home game', dome: 'Dome', rest: 'Rest days', wk: 'Week', exp_tkl_pts: 'Expected tackle points',
+  gap_ewma: 'Recent form above projection', gap_l16: 'Last-16 average above projection', gap_big: 'Big-play form above projection',
 };
 
-export const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DL', 'LB', 'DB'] as const;
+export const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF', 'DL', 'LB', 'DB'] as const;
+/** D/ST is ESPN's name for a team defense; Sleeper calls it DEF. */
+export const posLabel = (pos: string, on: string | undefined = platform) => (pos === 'DEF' && on === 'espn' ? 'D/ST' : pos);
 
 export const INJURY_SHORT: Record<string, string> = { Questionable: 'Q', Doubtful: 'D', Out: 'OUT', IR: 'IR', PUP: 'PUP', Sus: 'SUS', NA: 'NA', DNR: 'DNR', COV: 'COV', NFI: 'NFI' };

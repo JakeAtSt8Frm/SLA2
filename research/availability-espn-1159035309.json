@@ -1,0 +1,50 @@
+{
+  "Out": {
+    "n": 5219,
+    "rate": 0.0034
+  },
+  "Out:IDP": {
+    "n": 3180,
+    "rate": 0.0041
+  },
+  "Questionable": {
+    "n": 7082,
+    "rate": 0.6741
+  },
+  "Questionable:IDP": {
+    "n": 4317,
+    "rate": 0.6822
+  },
+  "Out:OFF": {
+    "n": 1988,
+    "rate": 0.0025
+  },
+  "Doubtful": {
+    "n": 761,
+    "rate": 0.0092
+  },
+  "Doubtful:IDP": {
+    "n": 425,
+    "rate": 0.0094
+  },
+  "Questionable:OFF": {
+    "n": 2686,
+    "rate": 0.6605
+  },
+  "Doubtful:OFF": {
+    "n": 330,
+    "rate": 0.0091
+  },
+  "Out:K": {
+    "n": 51,
+    "rate": 0
+  },
+  "Questionable:K": {
+    "n": 79,
+    "rate": 0.6962
+  },
+  "Doubtful:K": {
+    "n": 6,
+    "rate": 0
+  }
+}

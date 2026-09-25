@@ -6,10 +6,11 @@ import { TrendChart } from '../charts/charts.tsx';
 import { Card, CardHeader, ErrorState, Meter, PageHeader, PageSkeleton, PlayerLink, Pos, Segmented, TeamAvatar, TeamLink, cx } from '../components/ui.tsx';
 
 export default function PowerPage() {
-  const { leagueId, myTeamId, teamName } = useApp();
+  const { leagueId, myTeamId, teamName, boot } = useApp();
   const q = usePower(leagueId);
   const [focus, setFocus] = useState<number | null>(null);
-  const [metric, setMetric] = useState<'value' | 'dynasty'>('value');
+  const [chosen, setMetric] = useState<'value' | 'dynasty'>('value');
+  const metric = boot.league.isDynasty ? chosen : 'value';
   if (q.isPending) return <PageSkeleton />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   const p = q.data;
@@ -68,7 +69,7 @@ export default function PowerPage() {
             </div>
           </Card>
           <Card>
-            <CardHeader title="Roster value" right={<Segmented label="Value type" value={metric} onChange={setMetric} options={[{ value: 'value', label: 'Overall' }, { value: 'dynasty', label: 'Dynasty' }]} />} />
+            <CardHeader title="Roster value" right={boot.league.isDynasty ? <Segmented label="Value type" value={metric} onChange={setMetric} options={[{ value: 'value', label: 'Overall' }, { value: 'dynasty', label: 'Dynasty' }]} /> : undefined} />
             <div className="space-y-2">
               {[...p.rankings].sort((a, b) => (metric === 'value' ? b.rosterValue - a.rosterValue : b.dynastyValue - a.dynastyValue)).map(r => {
                 const v = metric === 'value' ? r.rosterValue : r.dynastyValue;

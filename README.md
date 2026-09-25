@@ -1,12 +1,19 @@
 # SLA 2.0 · League Intelligence
 
-A fantasy football analysis app for Sleeper leagues, built around **your league’s exact scoring**:
-custom rules, IDP, superflex and TE premium. It combines an ffwrapped-style league hub
-(standings, power rankings, playoff odds, awards, history) with SLA’s scoring-accurate analytics,
-and adds a trained projection model that powers start/sit, waivers and trades.
+A fantasy football analysis app for Sleeper and ESPN leagues, built around **each league’s exact
+scoring**: custom rules, IDP, superflex, TE premium, ESPN kicking and D/ST ladders. It combines an
+ffwrapped-style league hub (standings, power rankings, playoff odds, awards, history) with SLA’s
+scoring-accurate analytics, and adds trained projection models that power start/sit, waivers and trades.
 
-Default league: **Neighbas in Paris** (`1312656463549726720`). Any Sleeper NFL league works:
-switch from the league name in the top bar (league ID or Sleeper username).
+Leagues set up in this deployment (switch from the league name in the top bar):
+
+| League | Platform | Format | Model |
+|---|---|---|---|
+| **Neighbas in Paris** (`1312656463549726720`, default) | Sleeper | 6-team dynasty, superflex, 10 IDP | `model/model.json` |
+| **UK-BG** (`espn-390483100`) | ESPN | 8-team redraft, PPR, D/ST with yards-allowed ladder | `model/model-espn-390483100.json` |
+| **The O.J. Invitational** (`espn-1159035309`) | ESPN | 8-team redraft, half-PPR, D/ST | `model/model-espn-1159035309.json` |
+
+Any other Sleeper NFL league also works (league ID or Sleeper username in the switcher).
 
 ## Quick start
 
@@ -28,8 +35,9 @@ Checks:
 
 ```bash
 npm run check        # typecheck + unit tests (scoring parity, optimizer vs brute force, sims, model runtime)
-npm run smoke        # hits every API endpoint of a running server
+npm run smoke        # hits every API endpoint of a running server, for every configured league
 npm run verify:scoring   # replays every week of league history against Sleeper’s official scores
+npm run verify:espn      # rescoring ESPN leagues from stat lines vs ESPN’s official box scores
 ```
 
 ## What’s in it
@@ -37,16 +45,17 @@ npm run verify:scoring   # replays every week of league history against Sleeper�
 | Page | What it answers |
 |---|---|
 | **League hub** | Your matchup and win odds, standings with all-play/luck, playoff and title odds, awards, last week, recent moves |
-| **Start / sit** | Best legal lineup across all 21 slots (Hungarian assignment, kickoff locks respected), swap-by-swap confidence, win odds as set vs optimized |
-| **Waiver wire** | Every free agent tested in *your* roster: rest-of-season points added to your best lineup, net of the best drop (dynasty-aware), FAAB guidance, rival demand |
-| **Matchups** | 10,000-run player-level simulations, score distributions, side-by-side lineups, live scoring, past weeks |
+| **Start / sit** | Best legal lineup across every slot (Hungarian assignment, kickoff locks respected), swap-by-swap confidence, win odds as set vs optimized |
+| **Waiver wire** | Every free agent tested in *your* roster: rest-of-season points added to your best lineup, net of the best drop (dynasty-aware in dynasty leagues), FAAB guidance or waiver priority, rival demand |
+| **Matchups** | 8,000-run player-level simulations, score distributions, side-by-side lineups, live scoring, past weeks |
 | **Power rankings** | Composite of scoring, all-play, recent form and projected outlook, with trend and roster value |
-| **Playoff odds** | 20,000 simulated seasons: playoff/bye/title odds, finish distribution, this-week leverage, every remaining game |
+| **Playoff odds** | 12,000 simulated seasons: playoff/bye/title odds, finish distribution, this-week leverage, every remaining game |
 | **Roster & outlook** | Any team: positional strength vs league, schedule win odds, roster values, weekly scoring |
 | **Trade lab** | Re-optimizes both rosters every remaining week, re-simulates playoff odds, compares now vs dynasty value |
 | **Players** | 1,500+ players scored your way, model vs Sleeper edge, values; click any name for the full forecast, projection breakdown and game log |
 | **Season wrapped / History** | Awards, luck, lineup efficiency, MVPs, weekly heatmap; champions, all-time records, head-to-head across seasons |
-| **Model lab** | Holdout accuracy, lineup backtest, calibration, availability rates, live track record |
+| **Defense** | Points each defense allows to every position in league scoring (SLA 1.0’s matchup research), plus which offenses feed opposing D/STs |
+| **Model lab** | The league’s own model: holdout accuracy, lineup backtest, calibration, availability rates, live track record |
 
 ## How the numbers are made
 
@@ -78,6 +87,32 @@ the edge is +1.6 pts/week, which is too small to be statistically certain over o
 (95% CI −3.0 to +6.3). Honest bottom line: most of the win comes from always fielding the best legal,
 injury-aware lineup across all 21 slots; the model adds a real but modest edge on top, mostly at DL/LB/DB.
 
+### ESPN leagues
+
+ESPN supplies the league: settings, rosters, lineups, schedule, official scores, transactions and
+history back to 2021. Player stats, projections and injury tags come from Sleeper, joined on ESPN player
+id (then name and position for the few ids Sleeper lacks), and are scored with the ESPN league’s own rules
+translated onto Sleeper stat keys (`server/espn.ts`). ESPN’s kicking buckets and D/ST points/yards-allowed
+ladders don’t exist in Sleeper’s lines, so they are derived (`engine/derived.ts`). For projections the
+D/ST ladder gets the *probability* of each bucket, not the one bucket the projected average falls in.
+
+- **Scoring parity:** rescoring 3,281 ESPN player-weeks (both leagues, 2025–26, kickers and D/STs included)
+  reproduces ESPN’s official points exactly, and all 202 team totals. `tests/fixtures/espn-parity.json`
+  keeps 411 of them as a unit test.
+- **Models:** each league has its own model trained on its scoring (offense and kickers; no IDP). The trees’
+  correction to the provider is shrunk by a factor chosen on 2024 (0.5 for both). 2025 holdout MAE:
+  O.J. **5.33 vs 5.36** for the rescored provider projection (95% CI of the gap −0.06 to −0.01),
+  UK-BG **5.70 vs 5.72** (−0.05 to 0.00). That edge is small. Without IDP, Sleeper’s projections are already
+  good. On the O.J.’s real 2025 rosters, model lineups beat provider lineups by +0.1 pts/week (not
+  significant) and what managers actually started by +4.6 pts/week.
+- **D/STs** use the rescored projection as the mean with the residual spread of every D/ST game since
+  last season. A least-squares recalibration was tested out of sample and didn’t help.
+- **Credentials** live in `config/espn.json` (`swid`, `espn_s2`, league list), overridable with `ESPN_SWID` and
+  `ESPN_S2`. They are used server-side only and never sent to the browser; only configured leagues (and their
+  past seasons) can be opened. `espn_s2` expires every few months. When it does, the ESPN leagues stop
+  loading: copy fresh `SWID` and `espn_s2` cookies from a logged-in browser (DevTools › Application ›
+  Cookies › espn.com) into the file and redeploy.
+
 **Caveat:** Sleeper’s historical projections are final versions and may reflect late news. The server
 therefore saves every pregame forecast (`data/snapshots/`) and scores it after each week. That leakage-free
 track record appears in the Model lab as the season goes on.
@@ -93,8 +128,9 @@ server/     Hono API: Sleeper/nflverse clients with memory+disk caching and stal
             every 90 s), JSON views, pregame snapshot tracking
 web/        React 19 + TanStack Query + Tailwind v4, hand-built SVG charts
 research/   Data fetch, dataset build (same feature code as the server), training, backtest
-model/      model.json (exported trees + residual tables) and report.json (Model lab)
-tests/      Vitest suite incl. an official-score parity fixture
+model/      model.json / model-<league>.json (exported trees + residual tables) and matching report files
+config/     espn.json: ESPN login cookies and league list (server-side only)
+tests/      Vitest suite incl. Sleeper and ESPN official-score parity fixtures
 ```
 
 The live server and the training pipeline use the **same** feature code, and a parity check proves the
@@ -104,8 +140,13 @@ TypeScript tree runtime reproduces scikit-learn to within 0.00003 points.
 
 ```bash
 python3 -m venv research/.venv && research/.venv/bin/pip install -r research/requirements.txt
-npm run research     # fetch → dataset → train (tune 2024, hold out 2025) → backtest; writes model/
+npm run research       # Sleeper league: fetch → dataset → train (tune 2024, hold out 2025) → backtest
+npm run research:espn  # the same for each ESPN league (after research:fetch); writes model/model-espn-*.json
 ```
+
+Any league can be trained on its own: `node research/build-dataset.ts <leagueId>`, then
+`research/.venv/bin/python research/train.py <key>` and `node research/backtest.ts <leagueId>`, where the key is
+`espn-<id>` for ESPN leagues. The server picks up `model/model-<key>.json` automatically.
 
 Run it during the season (e.g. weekly) to fold in new games. Everything is cached, so re-runs take a few minutes.
 
@@ -125,6 +166,7 @@ run server-side.
 ## Data sources
 
 - Sleeper public API (free for non-commercial use): leagues, rosters, matchups, stats, projections.
+- ESPN Fantasy API (the league members’ own login): ESPN league settings, rosters, box scores, history.
 - nflverse (CC BY 4.0): schedule, kickoff times and betting lines; injury reports for the availability study.
 - DynastyProcess player ID crosswalk (GPL-3.0): used offline in research only.
 

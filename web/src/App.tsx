@@ -1,13 +1,14 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType, type LazyExoticComponent } from 'react';
+import { createPortal } from 'react-dom';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeftRight, BarChart3, CalendarDays, ChartNoAxesCombined, FlaskConical, History, LayoutDashboard, ListChecks,
   Menu, Moon, RefreshCw, ScrollText, Search, Shield, Sparkles, Sun, Swords, Trophy, UserPlus, Users, X,
 } from 'lucide-react';
-import { prefetchCore, searchLeagues, useBootstrap, type LeagueSearchResult } from './lib/api.ts';
+import { prefetchCore, searchLeagues, useBootstrap, useLeagues, type LeagueSearchResult } from './lib/api.ts';
 import { AppProvider, useApp, useTheme } from './lib/context.tsx';
 import { ago } from './lib/format.ts';
-import { DEFAULT_LEAGUE, navigate, pathFor, useRoute, type Page } from './lib/router.ts';
+import { DEFAULT_LEAGUE, isLeagueId, navigate, pathFor, useRoute, type Page } from './lib/router.ts';
 import { Button, cx, ErrorState, PageSkeleton, Select, TeamAvatar, useEscape } from './components/ui.tsx';
 import { PlayerDrawer } from './components/PlayerDrawer.tsx';
 
@@ -190,7 +191,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
           {boot.league.avatar ? <img src={boot.league.avatar} alt="" className="h-7 w-7 rounded-full" /> : <span className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-3 text-[11px] font-bold text-ink-2">{boot.league.name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()}</span>}
           <span className="min-w-0">
             <span className="block truncate text-[14px] font-semibold leading-tight">{boot.league.name}</span>
-            <span className="block truncate text-[11px] leading-tight text-ink-3">{boot.league.totalRosters}-team {boot.league.isDynasty ? 'dynasty' : 'redraft'} · {boot.league.idpSlots} IDP · updated {ago(boot.generatedAt)}</span>
+            <span className="block truncate text-[11px] leading-tight text-ink-3">{boot.league.platform === 'espn' ? 'ESPN' : 'Sleeper'} · {boot.league.totalRosters}-team {boot.league.isDynasty ? 'dynasty' : 'redraft'}{boot.league.idpSlots ? ` · ${boot.league.idpSlots} IDP` : ''} · updated {ago(boot.generatedAt)}</span>
           </span>
         </button>
         <div className="ml-auto flex items-center gap-1.5">
@@ -240,15 +241,42 @@ function PickTeam() {
 
 function LeagueDialog({ onClose }: { onClose: () => void }) {
   const dialog = useEscape(onClose);
-  return (
+  // Portal: the sticky, blurred header is its own stacking context and would trap the overlay beneath the page.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--overlay)] p-4 pt-[12vh]" onClick={onClose}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Switch league" className="card w-full max-w-md p-5 fade-in" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-[16px] font-semibold">Switch league</h2>
           <button onClick={onClose} className="rounded-md p-1 text-ink-3 hover:bg-surface-2" aria-label="Close"><X size={18} /></button>
         </div>
+        <YourLeagues onDone={onClose} />
+        <div className="eyebrow mb-2 mt-5">Open another Sleeper league</div>
         <LeagueFinder onDone={onClose} />
       </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** The leagues this deployment is set up for (Sleeper and ESPN), one click away. */
+function YourLeagues({ onDone }: { onDone: () => void }) {
+  const leagues = useLeagues();
+  const { leagueId } = useApp();
+  if (!leagues.data?.length) return null;
+  return (
+    <div className="space-y-1">
+      <div className="eyebrow mb-2">Your leagues</div>
+      {leagues.data.map(l => (
+        <button key={l.id} onClick={() => { onDone(); if (l.id !== leagueId) navigate(pathFor(l.id, 'hub')); }} aria-current={l.id === leagueId ? 'true' : undefined}
+          className={cx('flex w-full items-center gap-3 rounded-[9px] p-2 text-left hover:bg-surface-2', l.id === leagueId && 'bg-surface-2')}>
+          <span className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold', l.platform === 'espn' ? 'bg-[color-mix(in_oklab,#d00_18%,var(--surface-2))] text-ink' : 'bg-surface-3 text-ink-2')}>{l.platform === 'espn' ? 'ESPN' : 'SLPR'}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium">{l.name}</span>
+            <span className="block text-[12px] text-ink-3">{[l.season, l.teams ? `${l.teams} teams` : null, l.dynasty ? 'dynasty' : 'redraft'].filter(Boolean).join(' · ')}</span>
+          </span>
+          {l.id === leagueId && <span className="text-[12px] text-ink-3">Current</span>}
+        </button>
+      ))}
     </div>
   );
 }
@@ -262,7 +290,7 @@ function LeagueFinder({ onDone }: { onDone: () => void }) {
   const submit = async () => {
     const v = input.trim();
     setError(null);
-    if (/^\d{10,22}$/.test(v)) return go(v);
+    if (isLeagueId(v)) return go(v);
     if (!v) return;
     setBusy(true);
     try { setResult(await searchLeagues(v)); } catch (e) { setError(e instanceof Error ? e.message : 'Lookup failed'); } finally { setBusy(false); }

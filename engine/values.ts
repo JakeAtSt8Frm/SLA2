@@ -44,8 +44,11 @@ export function computeValues(args: {
   forecasts: ReadonlyMap<number, ReadonlyMap<string, WeekForecast>>;
   /** Players on any fantasy roster; everyone else is a free agent. */
   rostered: ReadonlySet<string>;
+  /** Keeper/dynasty league: long-term value counts. Defaults to true. */
+  dynasty?: boolean;
 }): Map<string, PlayerValue> {
   const { ids, players, weeks, forecasts, rostered } = args;
+  const keeper = args.dynasty ?? true;
   const ros = new Map<string, { avg: number; total: number; healthy: number }>();
   for (const id of ids) {
     let total = 0, n = 0, healthy = 0;
@@ -100,8 +103,9 @@ export function computeValues(args: {
   const out = new Map<string, PlayerValue>();
   for (const [id, r] of raw) {
     const ro = ros.get(id)!;
-    // Composite: half "helps now", half "long-term asset", both scaled to the league's best.
-    const value = 100 * (0.5 * Math.max(0, r.vorp) / maxVorp + 0.5 * r.dynasty / maxDynasty);
+    // Dynasty: half "helps now", half "long-term asset", both scaled to the league's best.
+    // Redraft: only this season counts.
+    const value = keeper ? 100 * (0.5 * Math.max(0, r.vorp) / maxVorp + 0.5 * r.dynasty / maxDynasty) : 100 * Math.max(0, r.vorp) / maxVorp;
     out.set(id, { id, rosAvg: ro.avg, rosTotal: ro.total, replacement: r.repl, vorp: r.vorp, dynasty: (100 * r.dynasty) / maxDynasty, value, posRank: 0, overallRank: 0, tier: 0 });
   }
   const sorted = [...out.values()].sort((a, b) => b.value - a.value);

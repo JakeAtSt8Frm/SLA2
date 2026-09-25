@@ -7,12 +7,33 @@ import { createWriteStream } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { FeatureState, FEATURE_NAMES, gameContext, type PlayerMeta } from '../engine/features.ts';
-import { compileScoring, didPlay, hasForecast, scoreStatsExact } from '../engine/scoring.ts';
+import { startable } from '../engine/lineup.ts';
+import { starterSlots } from '../engine/positions.ts';
+import { modelKey } from '../server/league.ts';
+import { sourceFor } from '../server/source.ts';
+import { compileScoring, completeStats, didPlay, hasForecast, scoreStatsExact } from '../engine/scoring.ts';
 import { nflGames, sleeper, weekProjections, weekStats, type WeekLine } from '../server/sleeper.ts';
 import { FIRST_SEASON, RAW_DIR, RESEARCH_DIR, weeksIn } from './fetch-history.ts';
 import type { NflGame } from '../engine/types.ts';
 
-const LEAGUE = '1312656463549726720';
+/**
+ * Usage: node research/build-dataset.ts [leagueId]. Each league is scored with its own rules, so
+ * each gets its own table (dataset-<key>.csv; the default Sleeper league writes dataset.csv).
+ */
+const LEAGUE = process.argv[2] ?? '1312656463549726720';
+const KEY = modelKey(LEAGUE);
+export const SUFFIX = KEY === 'default' ? '' : `-${KEY}`;
+
+/** Twice the league's weekly starting demand per position: the players a manager actually weighs. */
+function cohortFor(slots: string[], teams: number): Record<string, number> {
+  const share: Record<string, Record<string, number>> = {
+    FLEX: { RB: 0.45, WR: 0.45, TE: 0.1 }, WRRB_FLEX: { RB: 0.5, WR: 0.5 }, REC_FLEX: { WR: 0.8, TE: 0.2 },
+    SUPER_FLEX: { QB: 0.8, RB: 0.07, WR: 0.1, TE: 0.03 }, IDP_FLEX: { DL: 0.3, LB: 0.4, DB: 0.3 },
+  };
+  const demand: Record<string, number> = {};
+  for (const slot of slots) for (const [pos, w] of Object.entries(share[slot] ?? { [slot]: 1 })) demand[pos] = (demand[pos] ?? 0) + w;
+  return Object.fromEntries(Object.entries(demand).filter(([pos]) => pos !== 'DEF').map(([pos, d]) => [pos, Math.max(8, Math.round(2 * teams * d))]));
+}
 
 function parseCsv(text: string): Record<string, string>[] {
   const rows: Record<string, string>[] = [];
@@ -43,8 +64,10 @@ function parseCsv(text: string): Record<string, string>[] {
 
 async function main() {
   const state = await sleeper.state();
-  const league = await sleeper.league(LEAGUE);
+  const league = await sourceFor(LEAGUE).league();
   const scoring = compileScoring(league.scoring);
+  const slots = starterSlots(league.rosterPositions);
+  await writeFile(path.join(RESEARCH_DIR, `dataset${SUFFIX}.meta.json`), JSON.stringify({ league: LEAGUE, name: league.name, key: KEY, slots, teams: league.totalRosters, cohort: cohortFor(slots, league.totalRosters) }, null, 1));
   const players = await sleeper.players();
   const games = await nflGames();
   const gameIndex = new Map<string, NflGame>();
@@ -79,7 +102,7 @@ async function main() {
   };
   const fs = new FeatureState(scoring, meta);
 
-  const out = createWriteStream(path.join(RESEARCH_DIR, 'dataset.csv'));
+  const out = createWriteStream(path.join(RESEARCH_DIR, `dataset${SUFFIX}.csv`));
   const header = ['season', 'week', 'player_id', 'pos', 'team', 'opp', 'played', 'y', 'inj', ...FEATURE_NAMES];
   out.write(header.join(',') + '\n');
   let rows = 0;
@@ -101,14 +124,15 @@ async function main() {
       fs.clearAverages();
       for (const id of candidates) {
         const p = players[id];
-        if (!p || p.pos === 'DEF' || id.startsWith('TEAM_')) continue;
+        // Team defenses have their own forecast (engine/dst.ts); positions the league can't start don't matter.
+        if (!p || p.pos === 'DEF' || id.startsWith('TEAM_') || !startable(slots, p)) continue;
         const pl = projById.get(id), sl = statById.get(id);
         const team = pl?.team ?? sl?.team ?? null;
         if (!team) continue;
         const game = gameIndex.get(`${season}:${week}:${team}`);
         const ctx = game ? gameContext(game, team) : undefined;
         const played = didPlay(sl?.stats);
-        const y = played && sl ? scoreStatsExact(sl.stats, scoring) : 0;
+        const y = played && sl ? scoreStatsExact(completeStats(sl.stats, p.pos), scoring) : 0;
         const x = fs.features(id, season, week, pl?.stats, ctx, team);
         const cells = [season, week, id, p.pos, team, ctx?.opponent ?? '', played ? 1 : 0, y.toFixed(3), designation.get(`${season}:${week}:${id}`) ?? '', ...Array.from(x, v => (Number.isNaN(v) ? '' : Number(v.toFixed(5))))];
         out.write(cells.join(',') + '\n');
@@ -137,7 +161,7 @@ async function main() {
     add(`${r.status}:${['DL', 'LB', 'DB'].includes(pos) ? 'IDP' : pos === 'K' ? 'K' : 'OFF'}`, played);
   }
   const availability = Object.fromEntries([...tally].map(([k, v]) => [k, { n: v.n, rate: +(v.played / v.n).toFixed(4) }]));
-  await writeFile(path.join(RESEARCH_DIR, 'availability.json'), JSON.stringify(availability, null, 2));
+  await writeFile(path.join(RESEARCH_DIR, `availability${SUFFIX}.json`), JSON.stringify(availability, null, 2));
   console.log(`dataset rows: ${rows}`);
   console.log('availability', availability);
 }

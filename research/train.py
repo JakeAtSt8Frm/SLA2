@@ -27,16 +27,31 @@ ROOT = Path(__file__).resolve().parent
 OUT = ROOT.parent / 'model'
 OUT.mkdir(exist_ok=True)
 RNG = np.random.default_rng(7)
+# Usage: python train.py [key]. Each league is trained on its own scoring (dataset-<key>.csv).
+KEY = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] != 'default' else ''
+SUFFIX = f'-{KEY}' if KEY else ''
+META = json.loads((ROOT / f'dataset{SUFFIX}.meta.json').read_text()) if (ROOT / f'dataset{SUFFIX}.meta.json').exists() else {}
 
-df = pd.read_csv(ROOT / 'dataset.csv', dtype={'player_id': str, 'inj': str})
+df = pd.read_csv(ROOT / f'dataset{SUFFIX}.csv', dtype={'player_id': str, 'inj': str})
+# Only positions the league can start (a two-way player listed at DB but eligible at WR would
+# otherwise leave a handful of rows in a position no league slot uses).
+SLOT_POSITIONS = {'QB': ['QB'], 'RB': ['RB'], 'WR': ['WR'], 'TE': ['TE'], 'K': ['K'], 'DL': ['DL'], 'LB': ['LB'], 'DB': ['DB'],
+                  'FLEX': ['RB', 'WR', 'TE'], 'WRRB_FLEX': ['WR', 'RB'], 'REC_FLEX': ['WR', 'TE'], 'SUPER_FLEX': ['QB', 'RB', 'WR', 'TE'], 'IDP_FLEX': ['DL', 'LB', 'DB']}
+if META.get('slots'):
+    startable = {p for s in META['slots'] for p in SLOT_POSITIONS.get(s, [])}
+    df = df[df.pos.isin(startable)].copy()
 df['inj'] = df['inj'].fillna('')
 FEATURES_ALL = [c for c in df.columns if c not in ('season', 'week', 'player_id', 'pos', 'team', 'opp', 'played', 'y', 'inj')]
 # Sleeper's years_exp is frozen for retired players, so it is unreliable historically.
 FEATURES = [f for f in FEATURES_ALL if f not in ('exp',)]
+# Features a league's positions never produce (e.g. tackle stats without IDP) carry no signal.
+FEATURES = [f for f in FEATURES if df[f].notna().any() and df[f].nunique(dropna=True) > 1]
 VEGAS = ['implied', 'opp_implied', 'spread', 'total']
-POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DL', 'LB', 'DB']
-# Twice this six-team league's starting demand per position (superflex counted as a QB slot).
-COHORT = {'QB': 24, 'RB': 36, 'WR': 48, 'TE': 12, 'K': 12, 'DL': 36, 'LB': 48, 'DB': 36}
+POSITIONS = [p for p in ['QB', 'RB', 'WR', 'TE', 'K', 'DL', 'LB', 'DB'] if p in set(df.pos.unique())]
+# Twice the league's starting demand per position (the default six-team superflex league counts SF as a QB slot).
+COHORT = META.get('cohort') if KEY else {'QB': 24, 'RB': 36, 'WR': 48, 'TE': 12, 'K': 12, 'DL': 36, 'LB': 48, 'DB': 36}
+COHORT = {p: COHORT.get(p, 12) for p in POSITIONS}
+print('league', META.get('name', 'default'), 'positions', POSITIONS, 'cohort', COHORT, flush=True)
 
 played = df[df.played == 1].copy()
 # Rows a manager could realistically be deciding on: a provider forecast or a real track record.
@@ -75,9 +90,13 @@ def fit(train: pd.DataFrame, params: dict, residual: bool, max_iter: int):
     return model
 
 
+# Share of the trees' correction applied on top of the provider (chosen on the tuning season below).
+SHRINK = 1.0
+
+
 def predict(model, frame: pd.DataFrame, residual: bool) -> np.ndarray:
     raw = model.predict(frame[FEATURES])
-    return raw + base_prediction(frame) if residual else raw
+    return SHRINK * raw + base_prediction(frame) if residual else raw
 
 
 def linear_recalibration(train: pd.DataFrame):
@@ -173,6 +192,8 @@ GRID = [
     ({'learning_rate': 0.05, 'max_leaf_nodes': 63, 'min_samples_leaf': 100, 'l2_regularization': 2.0}, True, 300),
     ({'learning_rate': 0.04, 'max_leaf_nodes': 15, 'min_samples_leaf': 80, 'l2_regularization': 1.0, 'monotonic': True}, True, 500),
     ({'learning_rate': 0.03, 'max_leaf_nodes': 15, 'min_samples_leaf': 120, 'l2_regularization': 3.0, 'monotonic': True}, True, 800),
+    # Conservative corrections: small, heavily regularised adjustments to the provider.
+    ({'learning_rate': 0.03, 'max_leaf_nodes': 7, 'min_samples_leaf': 250, 'l2_regularization': 5.0, 'monotonic': True}, True, 300),
 ]
 tune_train = relevant[relevant.season <= 2023]
 tune_test = relevant[relevant.season == 2024]
@@ -187,6 +208,23 @@ for params, residual, iters in GRID:
         best = (score, params, residual, iters)
 _, PARAMS, RESIDUAL, ITERS = best
 print('selected', PARAMS, 'residual' if RESIDUAL else 'direct', ITERS, flush=True)
+
+# Shrinkage toward the provider, chosen on the same tuning season (2025 stays untouched).
+if RESIDUAL:
+    _, tuned = add_predictions(tune_train, tune_test, PARAMS, RESIDUAL, ITERS)
+    base = base_prediction(tuned)
+    correction = tuned['model'].to_numpy() - base
+    best_shrink = None
+    for lam in [0.0, 0.25, 0.5, 0.75, 1.0]:
+        trial = tuned.copy()
+        trial['model'] = base + lam * correction
+        ev = evaluate(trial, {'model': 'model'})['model']
+        score = ev['mae'] - 2 * (ev['pairAcc'] - 0.5)
+        print(f'  shrink {lam}: MAE {ev["mae"]} pair {ev["pairAcc"]} close {ev["closePairAcc"]}', flush=True)
+        if best_shrink is None or score < best_shrink[0] - 1e-9:
+            best_shrink = (score, lam)
+    SHRINK = best_shrink[1]
+print('shrink', SHRINK, flush=True)
 
 # ── 2. Holdout 2025 (train 2020-2024) and 2026 to date (train 2020-2025) ─────
 holdout_model, holdout = add_predictions(relevant[relevant.season <= 2024], relevant[relevant.season == 2025], PARAMS, RESIDUAL, ITERS)
@@ -283,7 +321,8 @@ print('export parity max abs diff:', check, flush=True)
 assert check < 1e-3, 'exported trees do not reproduce sklearn predictions'
 
 # Availability by official designation (measured, see availability.json).
-avail_raw = json.loads((ROOT / 'availability.json').read_text())
+avail_path = ROOT / f'availability{SUFFIX}.json'
+avail_raw = json.loads((avail_path if avail_path.exists() else ROOT / 'availability.json').read_text())
 none_rows = df[(df.inj == '') & (df.has_proj == 1)]
 availability = {
     'none': round(float(none_rows.played.mean()), 4),
@@ -305,6 +344,8 @@ for iteration in importance_model._predictors:
 importance = sorted(({'feature': FEATURES[i], 'share': round(float(gain[i] / gain.sum()), 4)} for i in range(len(FEATURES))), key=lambda d: -d['share'])[:20]
 
 meta = {
+    'league': META.get('name'),
+    'key': KEY or 'default',
     'version': time.strftime('%Y.%m.%d'),
     'trainedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     'trainingRows': int(len(relevant)),
@@ -312,16 +353,20 @@ meta = {
     'params': PARAMS,
     'residualTarget': RESIDUAL,
     'iterations': ITERS,
+    'shrink': SHRINK,
 }
 model_json = {
     'meta': meta,
     'features': FEATURES,
     'residualTarget': RESIDUAL,
+    'shrink': SHRINK,
     'points': exported,
     'residuals': residuals,
     'availability': availability,
 }
-(OUT / 'model.json').write_text(json.dumps(model_json, separators=(',', ':')))
+MODEL_NAME = f'model{SUFFIX}.json'
+REPORT_NAME = f'report{SUFFIX}.json'
+(OUT / MODEL_NAME).write_text(json.dumps(model_json, separators=(',', ':')))
 report = {
     'meta': meta,
     'holdout2025': report_2025,
@@ -332,16 +377,16 @@ report = {
     'importance': importance,
     'cohort': COHORT,
 }
-(OUT / 'report.json').write_text(json.dumps(report, indent=1))
-holdout[['season', 'week', 'player_id', 'pos', 'y', 'model', 'provider', 'linear', 'form']].to_csv(ROOT / 'predictions_2025.csv', index=False)
+(OUT / REPORT_NAME).write_text(json.dumps(report, indent=1))
+holdout[['season', 'week', 'player_id', 'pos', 'y', 'model', 'provider', 'linear', 'form']].to_csv(ROOT / f'predictions_2025{SUFFIX}.csv', index=False)
 # Every 2025 candidate (including players who ended up inactive) for the lineup backtest,
 # predicted by the model that never saw 2025.
 all25 = df[df.season == 2025].copy()
 all25['model'] = predict(holdout_model, all25, RESIDUAL)
 all25['provider'] = all25.proj_pts
-all25[['season', 'week', 'player_id', 'pos', 'played', 'y', 'inj', 'model', 'provider']].to_csv(ROOT / 'backtest_2025.csv', index=False)
+all25[['season', 'week', 'player_id', 'pos', 'played', 'y', 'inj', 'model', 'provider']].to_csv(ROOT / f'backtest_2025{SUFFIX}.csv', index=False)
 # Parity fixture: production-model predictions for a sample, checked by the TypeScript runtime.
 fixture = relevant.sample(400, random_state=3)
 fixture_out = pd.DataFrame({'season': fixture.season, 'week': fixture.week, 'player_id': fixture.player_id, 'expected': predict(final, fixture, RESIDUAL)})
-fixture_out.to_csv(ROOT / 'parity_fixture.csv', index=False)
-print(f"wrote model.json ({(OUT / 'model.json').stat().st_size/1e6:.2f} MB) and report.json", flush=True)
+fixture_out.to_csv(ROOT / f'parity_fixture{SUFFIX}.csv', index=False)
+print(f"wrote {MODEL_NAME} ({(OUT / MODEL_NAME).stat().st_size/1e6:.2f} MB) and {REPORT_NAME}", flush=True)

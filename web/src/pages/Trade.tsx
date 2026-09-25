@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ArrowLeftRight, Scale, X } from 'lucide-react';
 import { usePlayers, useTrade, type PlayerRow, type Trade } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
-import { fmt, prob, signed, POSITIONS, teamColor } from '../lib/format.ts';
+import { fmt, posLabel, prob, signed, teamColor } from '../lib/format.ts';
 import { Button, Card, CardHeader, Delta, Empty, ErrorState, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Select, TeamAvatar, cx } from '../components/ui.tsx';
 
 export default function TradePage() {
@@ -59,7 +59,7 @@ function RosterPicker({ rosterId, onTeam, exclude, players, selected, onPick }: 
       <div className="flex items-center gap-2 border-b border-line p-3">
         <TeamAvatar rosterId={rosterId} size={28} />
         <Select label="Team" value={rosterId} onChange={onTeam} options={boot.teams.filter(t => t.rosterId !== exclude).map(t => ({ value: t.rosterId, label: t.name }))} className="min-w-0 flex-1" />
-        <Select label="Position" value={pos} onChange={setPos} options={['ALL', ...POSITIONS].map(p => ({ value: p, label: p }))} className="w-20" />
+        <Select label="Position" value={pos} onChange={setPos} options={['ALL', ...boot.league.positions].map(p => ({ value: p, label: posLabel(p, boot.league.platform) }))} className="w-20" />
       </div>
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5 border-b border-line p-2.5">
@@ -107,7 +107,7 @@ function Result({ r }: { r: Trade }) {
 }
 
 function SideResult({ s, weeks }: { s: Trade['a']; weeks: number }) {
-  const { teamName } = useApp();
+  const { teamName, boot } = useApp();
   return (
     <Card>
       <CardHeader title={<span className="flex items-center gap-2"><TeamAvatar rosterId={s.rosterId} size={24} />{teamName(s.rosterId)}</span>} subtitle={`Roster after trade: ${s.rosterSizeAfter} active players`} />
@@ -126,10 +126,12 @@ function SideResult({ s, weeks }: { s: Trade['a']; weeks: number }) {
           <div className="text-[12px] text-ink-3">SLA value</div>
           <div className="num text-[16px] font-semibold">{fmt(s.valueOut, 0)} out · {fmt(s.valueIn, 0)} in <Delta value={s.valueIn - s.valueOut} digits={0} className="text-[13px]" /></div>
         </div>
-        <div>
-          <div className="text-[12px] text-ink-3">Dynasty value</div>
-          <div className="num text-[16px] font-semibold">{fmt(s.dynastyOut, 0)} out · {fmt(s.dynastyIn, 0)} in <Delta value={s.dynastyIn - s.dynastyOut} digits={0} className="text-[13px]" /></div>
-        </div>
+        {boot.league.isDynasty && (
+          <div>
+            <div className="text-[12px] text-ink-3">Dynasty value</div>
+            <div className="num text-[16px] font-semibold">{fmt(s.dynastyOut, 0)} out · {fmt(s.dynastyIn, 0)} in <Delta value={s.dynastyIn - s.dynastyOut} digits={0} className="text-[13px]" /></div>
+          </div>
+        )}
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <div><div className="eyebrow mb-1">Receives</div>{s.gets.length ? s.gets.map(p => <div key={p.id} className="flex items-center gap-2 py-0.5 text-[13px]"><Pos pos={p.pos} /><PlayerLink id={p.id} name={p.name} /><span className="num text-[12px] text-ink-3">{fmt(p.value?.rosAvg)}/wk</span></div>) : <div className="text-[13px] text-ink-3">Nothing</div>}</div>

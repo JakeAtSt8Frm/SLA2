@@ -6,7 +6,7 @@
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import type { LeagueCore } from './league.ts';
-import { compileScoring, didPlay, round, scoreStats } from '../engine/scoring.ts';
+import { compileScoring, completeStats, didPlay, round, scoreStats } from '../engine/scoring.ts';
 
 const DIR = process.env.SLA_SNAPSHOT_DIR ?? path.resolve(import.meta.dirname, '..', 'data', 'snapshots');
 const lastWrite = new Map<string, number>();
@@ -57,7 +57,8 @@ export async function trackRecord(core: LeagueCore) {
     for (const [id, e] of Object.entries(snap)) {
       if (e.owner === null || e.provider === null) continue;
       const line = stats.get(id);
-      const actual = line && didPlay(line.stats) ? scoreStats(line.stats, scoring) : 0;
+      const pos = core.players[id]?.pos;
+      const actual = line && pos && didPlay(line.stats) ? scoreStats(completeStats(line.stats, pos), scoring) : 0;
       n++;
       em += Math.abs(e.exp - actual);
       ep += Math.abs(e.provider * e.play - actual);

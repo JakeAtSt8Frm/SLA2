@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useDefense, usePlayers } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
-import { fmt, pct, POSITIONS } from '../lib/format.ts';
+import { fmt, pct, posLabel } from '../lib/format.ts';
 import { useSearchParam } from '../lib/router.ts';
 import { Card, CardHeader, Empty, ErrorState, PageHeader, PageSkeleton, PlayerLink, Pos, Segmented, Select, useSort, useTooltip } from '../components/ui.tsx';
 
-const IDP = new Set(['DL', 'LB', 'DB']);
+/** Groups whose rows are the offenses they faced rather than the defenses. */
+const FACING_OFFENSE = new Set(['DL', 'LB', 'DB', 'DEF']);
 // Diverging scale: tough (red) → neutral → soft (blue). Softer = better for the player.
 const DIVERGING = ['#b52f2e', '#dd5b5a', '#eea3a2', 'var(--surface-3)', '#9ec5f4', '#5598e7', '#1c5cab'];
 const divergingText = (i: number) => (i === 0 || i === 1 || i >= 5 ? '#fff' : i === 3 ? 'var(--ink)' : '#0b0b0b');
@@ -16,11 +17,11 @@ function Rating({ value }: { value: number }) {
 }
 
 export default function DefensePage() {
-  const { leagueId, myTeamId } = useApp();
+  const { leagueId, myTeamId, boot } = useApp();
   const [seasonParam, setSeason] = useSearchParam('season');
   const q = useDefense(leagueId, seasonParam ? Number(seasonParam) : undefined);
   const players = usePlayers(leagueId);
-  const [group, setGroup] = useState<string>('QB');
+  const [group, setGroup] = useState<string>(boot.league.positions[0] ?? 'QB');
   const tip = useTooltip();
   const d = q.data;
   const rows = useMemo(() => d?.groups[group] ?? [], [d, group]);
@@ -32,7 +33,9 @@ export default function DefensePage() {
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   if (!d) return null;
   const byTeam = new Map(rows.map(r => [r.team, r]));
-  const idp = IDP.has(group);
+  const idp = FACING_OFFENSE.has(group);
+  const label = posLabel(group, boot.league.platform);
+  const groups = boot.league.positions.filter(p => d.groups[p]);
   const allWeekly = rows.flatMap(r => r.weekly.map(w => w[1])).sort((a, b) => a - b);
   const heatStep = (v: number) => {
     const rank = allWeekly.findIndex(x => x >= v);
@@ -43,14 +46,14 @@ export default function DefensePage() {
     <div className="space-y-5">
       <PageHeader
         title="Defense"
-        subtitle={`Points allowed ${idp ? 'by offenses to IDP' : 'to each position'} in league scoring · ${d.season}${d.season === d.seasons[0] ? ` through week ${d.throughWeek}` : ''}`}
+        subtitle={`${group === 'DEF' ? `Points ${label}s score against each offense` : `Points allowed ${idp ? 'by offenses to IDP' : 'to each position'}`} in league scoring · ${d.season}${d.season === d.seasons[0] ? ` through week ${d.throughWeek}` : ''}`}
         right={<Select label="Season" value={d.season} onChange={v => setSeason(String(v), true)} options={d.seasons.map(s => ({ value: s, label: String(s) }))} className="w-28" />}
       />
-      <Segmented label="Position" value={group} onChange={setGroup} options={POSITIONS.map(p => ({ value: p, label: p }))} />
+      <Segmented label="Position" value={group} onChange={setGroup} options={groups.map(p => ({ value: p, label: posLabel(p, boot.league.platform) }))} />
 
       {mine.length > 0 && d.week && (
         <Card>
-          <CardHeader title={`Your ${group}s in week ${d.week}`} />
+          <CardHeader title={`Your ${label}${group === 'DEF' ? '' : 's'} in week ${d.week}`} />
           <div className="flex flex-wrap gap-2">
             {mine.map(p => {
               const opp = d.upcoming[p.team!];
@@ -114,7 +117,7 @@ export default function DefensePage() {
 
       {sorted.length > 0 && (
         <Card>
-          <CardHeader title="By week" subtitle={`${group} points allowed each week`} />
+          <CardHeader title="By week" subtitle={`${label} points allowed each week`} />
           <div className="overflow-x-auto scroll-thin">
             <div className="grid min-w-[640px] gap-[2px]" style={{ gridTemplateColumns: `56px repeat(${d.weeks.length}, minmax(34px,1fr))` }}>
               <div />
@@ -131,7 +134,7 @@ export default function DefensePage() {
                       const bg = ['var(--seq-1)', 'var(--seq-2)', 'var(--seq-3)', 'var(--seq-4)', 'var(--seq-5)', 'var(--seq-6)', 'var(--seq-7)'][s];
                       return (
                         <div key={w} className="num flex h-7 items-center justify-center rounded-[4px] text-[11px] font-medium" style={{ background: bg, color: s >= 3 ? '#fff' : '#0b0b0b' }}
-                          onPointerMove={e => tip.show(e, <span>{r.team} week {w}: <b className="num">{fmt(v)}</b> pts allowed to {group}</span>)} onPointerLeave={tip.hide}>
+                          onPointerMove={e => tip.show(e, <span>{r.team} week {w}: <b className="num">{fmt(v)}</b> pts allowed to {label}</span>)} onPointerLeave={tip.hide}>
                           {fmt(v, 0)}
                         </div>
                       );

@@ -1,0 +1,15 @@
+{
+  "_note": "ESPN session cookies for the private leagues below. Server-side only: never returned by the API or bundled into the web app. espn_s2 expires every few months; refresh it from a logged-in browser (DevTools > Application > Cookies > espn.com). ESPN_SWID / ESPN_S2 environment variables override these.",
+  "swid": "{36BD7DF5-5BE4-440D-BD7D-F55BE4240DB9}",
+  "espn_s2": "AECryiUWQDOJlN3aNVJbqo37dPHvTpostkzfzeaFUzELGSek4LQhOLfmcCntmaPt%2FIff%2FvnoSmVDuheHOX36tH3Q0I3cqkqHTSfrQCX6toWXMe%2FIRRlDdm1MWvrywpYwQbfUdQDG8GqlokVVTPhRB6eK4%2FPbDFGY0rUyVIb6DryDFPQO32D0TLmPEUUgTSJk4mQRGVbNoCw8tIeZ75LVKRtMKBPu4xEqbrfECZo4MItcdJTfDt4jryYNl4JPR3OzaS7mvETAyAIZY3PLjfsz4aJ4vhNo9GeTGpNXr%2BXZ42NElw%3D%3D",
+  "leagues": [
+    {
+      "id": "390483100",
+      "name": "UK-BG"
+    },
+    {
+      "id": "1159035309",
+      "name": "The O.J. Invitational"
+    }
+  ]
+}

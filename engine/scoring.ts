@@ -1,3 +1,4 @@
+import { deriveDefense, deriveKicking } from './derived.ts';
 import type { Pos, Stats } from './types.ts';
 
 export type ScoringSettings = Record<string, number>;
@@ -43,22 +44,22 @@ export function scoreStatsExact(stats: Stats, scoring: readonly [string, number]
 }
 
 /**
- * Provider projections omit a few derived components that actual stat lines carry.
- * Fill them in only when absent so a source that already supplies them is never double-counted.
+ * Prepare a raw stat line for scoring. Provider projections omit a few components actual
+ * lines carry (TE reception bonus, missed kicks), and kickers/defenses get the derived ladder
+ * keys ESPN scoring needs (see derived.ts). Components a source already supplies are never
+ * double-counted. `projection` switches defenses from exact buckets to bucket probabilities.
  */
-export function completeStats(stats: Stats, pos: Pos): Stats {
+export function completeStats(stats: Stats, pos: Pos, projection = false): Stats {
+  if (pos === 'K') return deriveKicking(stats, projection);
+  if (pos === 'DEF') return deriveDefense(stats, projection);
   let out = stats;
   if (pos === 'TE' && stats.rec && stats.bonus_rec_te === undefined) out = { ...out, bonus_rec_te: stats.rec };
-  if (pos === 'K' && stats.fgmiss === undefined && stats.fga !== undefined && stats.fgm !== undefined) {
-    out = { ...out, fgmiss: Math.max(0, stats.fga - stats.fgm) };
-  }
-  if (pos === 'K' && stats.xpmiss === undefined && stats.xpa !== undefined && stats.xpm !== undefined) {
-    out = { ...out, xpmiss: Math.max(0, stats.xpa - stats.xpm) };
-  }
+  // Individual return touchdowns, under the key ESPN scoring translates onto.
+  if (stats.st_td && stats.x_ret_td === undefined) out = { ...out, x_ret_td: stats.st_td };
   return out;
 }
 
-export type ScoreCategory = 'passing' | 'rushing' | 'receiving' | 'tackles' | 'big plays' | 'kicking' | 'other';
+export type ScoreCategory = 'passing' | 'rushing' | 'receiving' | 'tackles' | 'big plays' | 'kicking' | 'team defense' | 'other';
 
 const CATEGORY: Record<string, ScoreCategory> = {
   pass_yd: 'passing', pass_td: 'passing', pass_int: 'passing', pass_2pt: 'passing', pass_int_td: 'passing',
@@ -70,7 +71,8 @@ const CATEGORY: Record<string, ScoreCategory> = {
   fgm_0_19: 'kicking', fgm_20_29: 'kicking', fgm_30_39: 'kicking', fgm_40_49: 'kicking', fgm_50p: 'kicking',
   fgmiss: 'kicking', xpm: 'kicking', xpmiss: 'kicking',
 };
-export const categoryOf = (key: string): ScoreCategory => CATEGORY[key] ?? 'other';
+export const categoryOf = (key: string): ScoreCategory =>
+  CATEGORY[key] ?? (key.startsWith('x_fg') || key === 'x_xpmiss' ? 'kicking' : key.startsWith('x_pa_') || key.startsWith('x_ya_') || key.startsWith('x_dst_') ? 'team defense' : 'other');
 
 export const STAT_LABELS: Record<string, string> = {
   pass_yd: 'Pass yds', pass_td: 'Pass TD', pass_int: 'INT thrown', pass_2pt: 'Pass 2PT',
@@ -82,6 +84,19 @@ export const STAT_LABELS: Record<string, string> = {
   idp_fum_rec: 'Fumble recoveries', idp_def_td: 'Defensive TD', idp_safe: 'Safety', idp_blk_kick: 'Blocked kick',
   fgm_0_19: 'FG 0–19', fgm_20_29: 'FG 20–29', fgm_30_39: 'FG 30–39', fgm_40_49: 'FG 40–49', fgm_50p: 'FG 50+',
   fgmiss: 'FG missed', xpm: 'XP made', xpmiss: 'XP missed', st_td: 'Special teams TD', def_st_td: 'Return TD',
+  // Derived keys (engine/derived.ts) that ESPN scoring translates onto.
+  x_fgm_0_39: 'FG 0–39', x_fgm_40_49: 'FG 40–49', x_fgm_50p: 'FG 50+', x_fgm_50_59: 'FG 50–59', x_fgm_60p: 'FG 60+',
+  x_fgmiss: 'FG missed', x_fgmiss_0_39: 'FG missed 0–39', x_fgmiss_40_49: 'FG missed 40–49', x_fgmiss_50p: 'FG missed 50+',
+  x_fgmiss_50_59: 'FG missed 50–59', x_fgmiss_60p: 'FG missed 60+', x_xpmiss: 'XP missed', x_ret_td: 'Return TD',
+  x_pa_0: 'Shutout', x_pa_1_6: 'Pts allowed 1–6', x_pa_7_13: 'Pts allowed 7–13', x_pa_14_17: 'Pts allowed 14–17', x_pa_18_21: 'Pts allowed 18–21',
+  x_pa_22_27: 'Pts allowed 22–27', x_pa_28_34: 'Pts allowed 28–34', x_pa_35_45: 'Pts allowed 35–45', x_pa_46p: 'Pts allowed 46+',
+  x_ya_0_99: 'Yds allowed <100', x_ya_100_199: 'Yds allowed 100–199', x_ya_200_299: 'Yds allowed 200–299', x_ya_300_349: 'Yds allowed 300–349',
+  x_ya_350_399: 'Yds allowed 350–399', x_ya_400_449: 'Yds allowed 400–449', x_ya_450_499: 'Yds allowed 450–499', x_ya_500_549: 'Yds allowed 500–549', x_ya_550p: 'Yds allowed 550+',
+  x_dst_td: 'Defensive/return TD', x_dst_int: 'Interceptions', x_dst_fum_rec: 'Fumble recoveries', x_dst_sack: 'Sacks', x_dst_safe: 'Safeties',
+  x_dst_blk: 'Blocked kicks', x_dst_2pt: '2-pt return', x_dst_pa: 'Points allowed', x_dst_ya: 'Yards allowed',
+  pts_allow_0: 'Shutout', pts_allow_1_6: 'Pts allowed 1–6', pts_allow_7_13: 'Pts allowed 7–13', pts_allow_14_20: 'Pts allowed 14–20',
+  pts_allow_21_27: 'Pts allowed 21–27', pts_allow_28_34: 'Pts allowed 28–34', pts_allow_35p: 'Pts allowed 35+',
+  sack: 'Sacks', int: 'Interceptions', fum_rec: 'Fumble recoveries', safe: 'Safeties', def_td: 'Defensive TD', blk_kick: 'Blocked kicks',
 };
 
 export interface BreakdownLine { key: string; label: string; stat: number; multiplier: number; points: number; category: ScoreCategory }

@@ -1,0 +1,24 @@
+{
+ "league": "espn-390483100",
+ "name": "UK-BG",
+ "key": "espn-390483100",
+ "slots": [
+  "QB",
+  "RB",
+  "RB",
+  "WR",
+  "WR",
+  "TE",
+  "FLEX",
+  "DEF",
+  "K"
+ ],
+ "teams": 8,
+ "cohort": {
+  "QB": 16,
+  "RB": 39,
+  "WR": 39,
+  "TE": 18,
+  "K": 16
+ }
+}

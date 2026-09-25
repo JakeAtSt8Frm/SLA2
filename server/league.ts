@@ -2,13 +2,15 @@
  * Builds the in-memory analysis "core" for a league: every relevant player's forecast for
  * each remaining week, lineups, values, results and schedule. Endpoints are thin views over it.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { MINUTE } from './cache.ts';
 import {
   linesSignature, nflGames, sleeper, sleeperSchedule, weekProjections, weekStats,
   type SleeperLeague, type SleeperMatchup, type SleeperRoster, type SleeperTransaction, type SleeperUser, type WeekLine,
 } from './sleeper.ts';
+import { sourceFor, type LeagueExtras, type Platform } from './source.ts';
+import { defenseRows, fitDefenseModel, type DefenseModel } from '../engine/dst.ts';
 import { FeatureState } from '../engine/features.ts';
 import { forecastPlayer, type ForecastEnv, type WeekForecast } from '../engine/forecast.ts';
 import { adviseLineup, bestLineup, startable, type LineupAdvice, type TeamLineup } from '../engine/lineup.ts';
@@ -20,8 +22,29 @@ import { computeValues, type PlayerValue } from '../engine/values.ts';
 import type { NflGame, PlayerInfo, Stats } from '../engine/types.ts';
 
 export const MODEL_DIR = path.resolve(import.meta.dirname, '..', 'model');
-const modelFile = JSON.parse(readFileSync(path.join(MODEL_DIR, 'model.json'), 'utf8')) as ModelFile;
-export const model = new ProjectionModel(modelFile);
+
+/**
+ * Each league scores differently, so each gets a model trained on its own scoring when one
+ * exists (model/model-<key>.json); otherwise the default model (trained on the Sleeper league).
+ */
+export function modelKey(leagueId: string): string {
+  return /^espn-\d+/.exec(leagueId)?.[0] ?? 'default';
+}
+const modelFiles = (key: string) => key === 'default'
+  ? { model: path.join(MODEL_DIR, 'model.json'), report: path.join(MODEL_DIR, 'report.json') }
+  : { model: path.join(MODEL_DIR, `model-${key}.json`), report: path.join(MODEL_DIR, `report-${key}.json`) };
+const models = new Map<string, ProjectionModel>();
+export function modelFor(leagueId: string): { key: string; model: ProjectionModel; reportFile: string } {
+  let key = modelKey(leagueId);
+  if (!existsSync(modelFiles(key).model)) key = 'default';
+  let m = models.get(key);
+  if (!m) {
+    m = new ProjectionModel(JSON.parse(readFileSync(modelFiles(key).model, 'utf8')) as ModelFile);
+    models.set(key, m);
+  }
+  return { key, model: m, reportFile: modelFiles(key).report };
+}
+export const model = modelFor('default').model;
 
 export interface TeamInfo {
   rosterId: number;
@@ -34,7 +57,14 @@ export interface TeamInfo {
 
 export interface LeagueCore {
   id: string;
+  platform: Platform;
+  /** Which trained model serves this league. */
+  modelKey: string;
   league: SleeperLeague;
+  /** Roster owned by the configured login (ESPN), if known. */
+  myRosterId: number | null;
+  outlooks: Map<string, string>;
+  defenseModel: DefenseModel | null;
   users: SleeperUser[];
   teams: TeamInfo[];
   season: number;
@@ -100,6 +130,8 @@ function tagOf(value: object): number {
 }
 
 interface Inputs {
+  platform: Platform;
+  extras: LeagueExtras;
   state: Awaited<ReturnType<typeof sleeper.state>>;
   league: SleeperLeague;
   users: SleeperUser[];
@@ -130,8 +162,9 @@ interface Inputs {
 
 async function loadInputs(id: string): Promise<Inputs> {
   const warnings: string[] = [];
-  const [state, league] = await Promise.all([sleeper.state(), sleeper.league(id)]);
-  const [users, rosters, players, allGames] = await Promise.all([sleeper.users(id), sleeper.rosters(id), sleeper.players(), nflGames()]);
+  const src = sourceFor(id);
+  const [state, league] = await Promise.all([sleeper.state(), src.league()]);
+  const [users, rosters, players, allGames, extras] = await Promise.all([src.users(), src.rosters(), sleeper.players(), nflGames(), src.extras()]);
   const season = league.season;
   const { lastRegular, last } = lastFantasyWeek(league);
   const seasonOver = season < state.season || league.status === 'complete';
@@ -151,10 +184,10 @@ async function loadInputs(id: string): Promise<Inputs> {
     Promise.all(pastWeeks.map(w => weekProjections(fresh(season, w)).catch(none))),
     Promise.all(horizon.map(w => weekProjections(fresh(season, w)).catch(none))),
     week !== null ? weekStats(fresh(season, week)).catch(none) : Promise.resolve(none()),
-    Promise.all(Array.from({ length: lastRegular }, (_, i) => sleeper.matchups(id, i + 1, seasonOver).catch(() => [] as SleeperMatchup[]))),
+    Promise.all(Array.from({ length: lastRegular }, (_, i) => src.matchups(i + 1, seasonOver).catch(() => [] as SleeperMatchup[]))),
     sleeper.trending('add').catch(() => []),
     week !== null ? sleeperSchedule(season).catch(() => []) : Promise.resolve([]),
-    Promise.all(txWeeks.map(w => sleeper.transactions(id, w, seasonOver || (week !== null && w < week - 1)).catch(() => []))),
+    Promise.all(txWeeks.map(w => src.transactions(w, seasonOver || (week !== null && w < week - 1)).catch(() => []))),
   ]);
   const games = allGames.filter(g => g.season === season);
   if (!games.length) warnings.push('NFL schedule unavailable: kickoff locks and byes cannot be verified.');
@@ -174,7 +207,7 @@ async function loadInputs(id: string): Promise<Inputs> {
   ].join('|');
 
   return {
-    state, league, users, rosters, players, games, week, lastScored, lastRegular, last, horizon, seasonOver, pastWeeks, prevWeeks,
+    platform: src.platform, extras, state, league, users, rosters, players, games, week, lastScored, lastRegular, last, horizon, seasonOver, pastWeeks, prevWeeks,
     prevStats, prevProj, curStats, curProj, futureProj, liveStats, schedule, trending, liveSchedule, transactions, warnings, fingerprint,
   };
 }
@@ -188,6 +221,7 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
 
   // Injury tags ride along with the (frequently refreshed) projection rows; prefer whichever is newer.
   const players: Record<string, PlayerInfo> = Object.create(input.players) as Record<string, PlayerInfo>;
+  Object.assign(players, input.extras.players);
   for (const line of [...(futureProj[0] ?? []), ...liveStats]) {
     const base = input.players[line.id];
     if (!base || !line.injury) continue;
@@ -239,9 +273,16 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
     return st;
   };
   const liveMap = new Map<string, Stats>(liveStats.map(l => [l.id, l.stats]));
+  const { model, key: modelKeyUsed } = modelFor(id);
+  // Team defenses: residual spread from every D/ST game on record (last season plus this one so far).
+  const hasDefense = slots.includes('DEF');
+  const defenseModel = hasDefense ? fitDefenseModel(defenseRows(
+    [...prevWeeks.map((_, i) => ({ stats: prevStats[i], projections: projStatsMap(prevProj[i]) })), ...pastWeeks.map((_, i) => ({ stats: curStats[i], projections: projStatsMap(curProj[i]) }))],
+    pid => input.players[pid]?.pos === 'DEF', scoring,
+  )) : null;
   const env: ForecastEnv = {
     model, state: fs, season, currentWeek: week ?? last + 1, players, scoring, gameFor,
-    projections: w => projectionsByWeek.get(w), liveStats: liveMap, gameStatus, now,
+    projections: w => projectionsByWeek.get(w), liveStats: liveMap, gameStatus, defense: defenseModel, now,
   };
 
   // Relevant universe: rostered players, anyone with a forecast soon, anyone with a real track record.
@@ -256,7 +297,9 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
   for (const lines of [...curStats, ...prevStats.slice(-8)]) for (const l of lines) if (didPlay(l.stats)) relevantSet.add(l.id);
   const relevant = [...relevantSet].filter(pid => {
     const p = players[pid];
-    return p && p.pos !== 'DEF' && startable(slots, p) && (ownerOf.has(pid) || fs.history(pid).length > 0 || projectionsByWeek.get(horizon[0] ?? -1)?.has(pid));
+    if (!p || !startable(slots, p)) return false;
+    if (p.pos === 'DEF') return hasDefense && !!p.team;
+    return ownerOf.has(pid) || fs.history(pid).length > 0 || projectionsByWeek.get(horizon[0] ?? -1)?.has(pid);
   });
 
   // Everyone gets the next two weeks; later weeks only for players who could matter to a lineup.
@@ -313,10 +356,11 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
   }
   const summaries = summarizeSeason(results, teams.map(t => t.rosterId));
   await tick();
-  const values = computeValues({ ids: relevant, players, weeks: horizon, forecasts, rostered: new Set(ownerOf.keys()) });
+  const values = computeValues({ ids: relevant, players, weeks: horizon, forecasts, rostered: new Set(ownerOf.keys()), dynasty: league.isDynasty });
 
   return {
-    id, league, users, teams, season, week, lastScored, lastRegularWeek: lastRegular, lastWeek: last, horizon, slots, players, relevant,
+    id, platform: input.platform, modelKey: modelKeyUsed, myRosterId: input.extras.myRosterId, outlooks: input.extras.outlooks, defenseModel,
+    league, users, teams, season, week, lastScored, lastRegularWeek: lastRegular, lastWeek: last, horizon, slots, players, relevant,
     forecasts, env, ownerOf, taxiOrIr, schedule: new Map(schedule.map((m, i) => [i + 1, m])), results, summaries, values, advice, bestByWeek,
     transactions: input.transactions, trending: new Map(input.trending.map(t => [t.id, t.count])), statsByWeek, prevStatsByWeek, projectionsByWeek,
     games, gameFor, isLocked, generatedAt: new Date(now).toISOString(), warnings,
