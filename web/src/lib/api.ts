@@ -94,9 +94,14 @@ export interface ModelReport {
   meta: { league?: string | null; key?: string; version: string; trainedAt: string; trainingRows: number; seasons: number[]; params: Record<string, number>; iterations: number };
   holdout2025: Record<'model' | 'provider' | 'linear' | 'form', Metrics>;
   live2026: Record<'model' | 'provider' | 'linear' | 'form', Metrics> | null;
+  /** 2026 weeks scored out of sample. */
+  live2026Weeks?: number[];
   maeDeltaCI2025: [number, number];
   coverage80: Record<string, number>;
-  availability: { none: number; Questionable: number; Doubtful: number; Out: number; n: Record<string, number> };
+  availability: {
+    none: number; Questionable: number; Doubtful: number; Out: number; n: Record<string, number>;
+    roles?: { Questionable?: { starter: number; reserve: number } };
+  };
   importance: { feature: string; share: number }[];
   cohort: Record<string, number>;
   lineupBacktest?: {

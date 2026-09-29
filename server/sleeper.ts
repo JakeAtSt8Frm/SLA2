@@ -372,6 +372,23 @@ function parseWeekLines(value: unknown): WeekLine[] {
   return out;
 }
 
+const lineSignatures = new WeakMap<WeekLine, number>();
+/** Content signature of one row (team, every stat key and value), memoised per row object. */
+export function lineSignature(line: WeekLine): number {
+  let h = lineSignatures.get(line);
+  if (h !== undefined) return h;
+  h = 17;
+  const mix = (text: string) => { for (let i = 0; i < text.length; i++) h = (Math.imul(h!, 31) + text.charCodeAt(i)) | 0; };
+  mix(line.team ?? '-');
+  for (const k in line.stats) {
+    mix(k);
+    h = (Math.imul(h, 31) + Math.round(line.stats[k] * 1000)) | 0;
+  }
+  h >>>= 0;
+  lineSignatures.set(line, h);
+  return h;
+}
+
 /** Cheap content signature so unchanged refreshes don't trigger recomputation. */
 export function linesSignature(lines: readonly WeekLine[]): number {
   let h = lines.length | 0;

@@ -18,10 +18,21 @@ export interface ModelFile {
   shrink?: number;
   points: { baseline: number; trees: ExportedTree[] };
   residuals: Record<string, { edges: number[]; quantiles: number[][] }>;
-  availability: { none: number; Questionable: number; Doubtful: number; Out: number };
+  availability: {
+    none: number; Questionable: number; Doubtful: number; Out: number;
+    /** Questionable split by role: starters (≥50% of recent snaps) play more often than reserves. */
+    roles?: { Questionable?: { starter: number; reserve: number } };
+    /** P(plays k weeks ahead | healthy starter now), k = 1…, by position group (QB, RB, WR, TE, K, IDP). */
+    ahead?: Record<string, number[]>;
+  };
 }
 
-interface PackedTree { f: Int16Array; t: Float64Array; l: Int32Array; r: Int32Array; m: Uint8Array; v: Float64Array }
+/**
+ * Every tree packed end to end into one set of typed arrays (node indices are absolute). With the
+ * input gathered once into the model's column order, prediction is one tight loop over contiguous
+ * memory instead of a walk over per-tree objects (≈30% faster, identical results).
+ */
+interface PackedForest { roots: Int32Array; feature: Int16Array; threshold: Float64Array; left: Int32Array; right: Int32Array; missingLeft: Uint8Array; value: Float64Array }
 
 const IDX = Object.fromEntries(FEATURE_NAMES.map((n, i) => [n, i])) as Record<string, number>;
 
@@ -30,9 +41,10 @@ const OUT_STATUSES = new Set(['Out', 'IR', 'PUP', 'Sus', 'Suspended', 'NA', 'DNR
 
 export class ProjectionModel {
   readonly meta: ModelFile['meta'];
-  private trees: PackedTree[];
+  private forest: PackedForest;
   private baseline: number;
   private columns: Int32Array;
+  private row: Float64Array;
   private residualTarget: boolean;
   private shrink: number;
   private residuals: ModelFile['residuals'];
@@ -59,23 +71,25 @@ export class ProjectionModel {
       if (i === undefined) throw new Error(`Model feature ${name} is not produced by engine/features.ts`);
       return i;
     }));
-    this.trees = file.points.trees.map(t => ({
-      f: Int16Array.from(t.f), t: Float64Array.from(t.t), l: Int32Array.from(t.l), r: Int32Array.from(t.r), m: Uint8Array.from(t.m), v: Float64Array.from(t.v),
-    }));
+    this.row = new Float64Array(this.columns.length);
+    this.forest = packForest(file.points.trees);
   }
 
   /** Expected league points if the player takes the field. */
   predict(x: Float64Array): number {
-    const cols = this.columns;
+    const cols = this.columns, row = this.row;
+    for (let i = 0; i < cols.length; i++) row[i] = x[cols[i]];
+    const { roots, feature, threshold, left, right, missingLeft, value } = this.forest;
     let out = this.baseline;
-    for (const tree of this.trees) {
-      let node = 0;
-      while (tree.f[node] !== -1) {
-        const value = x[cols[tree.f[node]]];
-        const left = value !== value ? tree.m[node] === 1 : value <= tree.t[node];
-        node = left ? tree.l[node] : tree.r[node];
+    for (let t = 0; t < roots.length; t++) {
+      let node = roots[t];
+      let f = feature[node];
+      while (f !== -1) {
+        const v = row[f];
+        node = (v !== v ? missingLeft[node] === 1 : v <= threshold[node]) ? left[node] : right[node];
+        f = feature[node];
       }
-      out += tree.v[node];
+      out += value[node];
     }
     if (this.residualTarget) {
       out *= this.shrink;
@@ -107,12 +121,46 @@ export class ProjectionModel {
    * Probability of playing from the Sleeper injury designation, measured on 2020–2025 official
    * reports (Questionable ≈ 67%). Weekly projections alone cannot tell us this pregame.
    */
-  playProbability(injuryStatus: string | null, onNflRoster: boolean): number {
+  playProbability(injuryStatus: string | null, onNflRoster: boolean, role?: 'starter' | 'reserve'): number {
     if (!onNflRoster) return 0;
     if (!injuryStatus) return this.avail.none;
     if (OUT_STATUSES.has(injuryStatus)) return 0;
     if (injuryStatus === 'Doubtful') return this.avail.Doubtful;
-    if (injuryStatus === 'Questionable') return this.avail.Questionable;
+    if (injuryStatus === 'Questionable') return (role && this.avail.roles?.Questionable?.[role]) || this.avail.Questionable;
     return this.avail.none;
   }
+
+  /**
+   * Chance a player who is healthy now plays `weeksAhead` weeks from now (injuries, benchings),
+   * measured on 2020–25 starters. Season-long value uses this; lineup planning does not, because a
+   * roster covers an injured starter from the bench.
+   */
+  healthyAhead(group: string, weeksAhead: number): number {
+    const curve = this.avail.ahead?.[group];
+    if (!curve?.length || weeksAhead <= 0) return this.avail.none;
+    return curve[Math.min(weeksAhead, curve.length) - 1];
+  }
+}
+
+function packForest(trees: readonly ExportedTree[]): PackedForest {
+  const size = trees.reduce((n, t) => n + t.f.length, 0);
+  const forest: PackedForest = {
+    roots: new Int32Array(trees.length), feature: new Int16Array(size), threshold: new Float64Array(size),
+    left: new Int32Array(size), right: new Int32Array(size), missingLeft: new Uint8Array(size), value: new Float64Array(size),
+  };
+  let offset = 0;
+  trees.forEach((t, i) => {
+    forest.roots[i] = offset;
+    for (let n = 0; n < t.f.length; n++) {
+      const at = offset + n;
+      forest.feature[at] = t.f[n];
+      forest.threshold[at] = t.t[n];
+      forest.left[at] = t.l[n] + offset;
+      forest.right[at] = t.r[n] + offset;
+      forest.missingLeft[at] = t.m[n];
+      forest.value[at] = t.v[n];
+    }
+    offset += t.f.length;
+  });
+  return forest;
 }

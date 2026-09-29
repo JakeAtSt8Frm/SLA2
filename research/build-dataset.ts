@@ -7,13 +7,14 @@ import { createWriteStream } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { FeatureState, FEATURE_NAMES, gameContext, type PlayerMeta } from '../engine/features.ts';
+import { aheadGroup, roleOf } from '../engine/forecast.ts';
 import { startable } from '../engine/lineup.ts';
 import { starterSlots } from '../engine/positions.ts';
 import { modelKey } from '../server/league.ts';
 import { sourceFor } from '../server/source.ts';
 import { compileScoring, completeStats, didPlay, hasForecast, scoreStatsExact } from '../engine/scoring.ts';
 import { nflGames, sleeper, weekProjections, weekStats, type WeekLine } from '../server/sleeper.ts';
-import { FIRST_SEASON, RAW_DIR, RESEARCH_DIR, weeksIn } from './fetch-history.ts';
+import { completedThrough, FIRST_SEASON, RAW_DIR, RESEARCH_DIR, weeksIn } from './fetch-history.ts';
 import type { NflGame } from '../engine/types.ts';
 
 /**
@@ -64,6 +65,7 @@ function parseCsv(text: string): Record<string, string>[] {
 
 async function main() {
   const state = await sleeper.state();
+  const done = await completedThrough(state);
   const league = await sourceFor(LEAGUE).league();
   const scoring = compileScoring(league.scoring);
   const slots = starterSlots(league.rosterPositions);
@@ -108,10 +110,23 @@ async function main() {
   let rows = 0;
 
   const playedSets = new Map<string, Set<string>>(); // `${season}:${week}` → ids with a snap
+  // Role when designated: starter (≥50% of snaps over his last four games) or not, as the server sees it.
+  const roles = new Map<string, 'starter' | 'reserve'>(); // `${season}:${week}:${id}`
+  const injuredBy = new Map<string, string[]>();
+  // Future availability: untagged starters who played a week, and whether they played k weeks later.
+  const anchors: { season: number; week: number; id: string; team: string; group: string }[] = [];
+  const teamsPlayed = new Map<string, Set<string>>(); // `${season}:${week}` → teams with a game
+  const lastWeekOf = new Map<number, number>();
+  for (const r of injuryRows) {
+    const key = `${r.season}:${r.week}`;
+    if (!injuredBy.has(key)) injuredBy.set(key, []);
+    injuredBy.get(key)!.push(r.id);
+  }
 
   for (season = FIRST_SEASON; season <= state.season; season++) {
     fs.startSeason(season);
-    const lastWeek = season < state.season ? weeksIn(season) : state.week - 1;
+    const lastWeek = season < state.season ? weeksIn(season) : done;
+    lastWeekOf.set(season, lastWeek);
     for (let week = 1; week <= lastWeek; week++) {
       const f = { season, week, currentSeason: state.season, currentWeek: state.week };
       const [stats, proj] = await Promise.all([weekStats(f), weekProjections(f)]);
@@ -121,7 +136,12 @@ async function main() {
       const playedIds = new Set<string>();
       for (const s of stats) if (didPlay(s.stats)) { candidates.add(s.id); playedIds.add(s.id); }
       playedSets.set(`${season}:${week}`, playedIds);
+      teamsPlayed.set(`${season}:${week}`, new Set(stats.filter(s => s.team && didPlay(s.stats)).map(s => s.team!)));
       fs.clearAverages();
+      for (const id of injuredBy.get(`${season}:${week}`) ?? []) {
+        const p = players[id];
+        if (p) roles.set(`${season}:${week}:${id}`, roleOf(p.pos, fs.features(id, season, week, undefined, undefined, null)));
+      }
       for (const id of candidates) {
         const p = players[id];
         // Team defenses have their own forecast (engine/dst.ts); positions the league can't start don't matter.
@@ -134,6 +154,7 @@ async function main() {
         const played = didPlay(sl?.stats);
         const y = played && sl ? scoreStatsExact(completeStats(sl.stats, p.pos), scoring) : 0;
         const x = fs.features(id, season, week, pl?.stats, ctx, team);
+        if (pl && played && !designation.has(`${season}:${week}:${id}`) && roleOf(p.pos, x) === 'starter') anchors.push({ season, week, id, team, group: aheadGroup(p.pos) });
         const cells = [season, week, id, p.pos, team, ctx?.opponent ?? '', played ? 1 : 0, y.toFixed(3), designation.get(`${season}:${week}:${id}`) ?? '', ...Array.from(x, v => (Number.isNaN(v) ? '' : Number(v.toFixed(5))))];
         out.write(cells.join(',') + '\n');
         rows++;
@@ -159,8 +180,36 @@ async function main() {
     const pos = players[r.id]?.pos ?? 'UNK';
     add(r.status, played);
     add(`${r.status}:${['DL', 'LB', 'DB'].includes(pos) ? 'IDP' : pos === 'K' ? 'K' : 'OFF'}`, played);
+    const role = roles.get(`${r.season}:${r.week}:${r.id}`);
+    if (role) add(`${r.status}:${role}`, played);
   }
-  const availability = Object.fromEntries([...tally].map(([k, v]) => [k, { n: v.n, rate: +(v.played / v.n).toFixed(4) }]));
+  const availability: Record<string, unknown> = Object.fromEntries([...tally].map(([k, v]) => [k, { n: v.n, rate: +(v.played / v.n).toFixed(4) }]));
+
+  // ── P(plays k weeks ahead | healthy starter now), k = 1…17, by position group (byes skipped) ──
+  const HORIZON = 17;
+  const ahead = new Map<string, { n: number[]; played: number[] }>();
+  for (const a of anchors) {
+    const t = ahead.get(a.group) ?? { n: new Array(HORIZON).fill(0), played: new Array(HORIZON).fill(0) };
+    ahead.set(a.group, t);
+    for (let k = 1; k <= HORIZON; k++) {
+      const w = a.week + k;
+      if (w > (lastWeekOf.get(a.season) ?? 0)) break;
+      if (!teamsPlayed.get(`${a.season}:${w}`)?.has(a.team)) continue;
+      t.n[k - 1]++;
+      if (playedSets.get(`${a.season}:${w}`)?.has(a.id)) t.played[k - 1]++;
+    }
+  }
+  const curve: Record<string, number[]> = {};
+  for (const [group, t] of ahead) {
+    const rates: number[] = [];
+    for (let k = 0; k < HORIZON; k++) {
+      // Thin cells at long horizons carry the previous rate forward (and never rise).
+      const rate = t.n[k] >= 200 ? t.played[k] / t.n[k] : rates[k - 1] ?? 1;
+      rates.push(+Math.min(rate, rates[k - 1] ?? 1).toFixed(4));
+    }
+    curve[group] = rates;
+  }
+  availability.ahead = curve;
   await writeFile(path.join(RESEARCH_DIR, `availability${SUFFIX}.json`), JSON.stringify(availability, null, 2));
   console.log(`dataset rows: ${rows}`);
   console.log('availability', availability);

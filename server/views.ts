@@ -1,6 +1,7 @@
 /** JSON views over the league core. Everything returned here is what the web app renders. */
 import { readFileSync } from 'node:fs';
 import { memo, HOUR } from './cache.ts';
+import { prepare } from './http.ts';
 import { getCore, modelFor, onCoreBuilt, playoffShape, type LeagueCore } from './league.ts';
 import { sleeper, type SleeperMatchup } from './sleeper.ts';
 import { sourceFor } from './source.ts';
@@ -127,12 +128,41 @@ function teamView(core: LeagueCore, rosterId: number) {
   };
 }
 
-function teamDist(core: LeagueCore, rosterId: number, week: number): TeamWeekDist {
+/**
+ * Not every manager starts their best lineup. Replaying this league's 2024–25 seasons, the lineups
+ * actually started were worth 68–97% of each team's best projected lineup, and a team's rate carried
+ * from the first half of the season into the second. Scaling a team's future weeks by its lineup
+ * efficiency relative to the league (shrunk toward average with six weeks of prior) cut the error of
+ * second-half team projections by 6–13% and the Brier score of game win probabilities by 6–12%
+ * (research/review.py). 1 means league-average lineup setting.
+ */
+function managerFactor(core: LeagueCore, rosterId: number): number {
+  const factors = once(core, 'managerFactors', () => {
+    const PRIOR_WEEKS = 6;
+    let points = 0, optimal = 0;
+    for (const s of core.summaries.values()) { points += s.pointsFor; if (s.efficiency > 0) optimal += s.pointsFor / s.efficiency; }
+    const league = optimal > 0 ? points / optimal : 0;
+    const out = new Map<number, number>();
+    for (const s of core.summaries.values()) {
+      const n = s.weekly.length;
+      const relative = league > 0 && s.efficiency > 0 ? s.efficiency / league : 1;
+      out.set(s.rosterId, Math.min(1.1, Math.max(0.8, (n * relative + PRIOR_WEEKS) / (n + PRIOR_WEEKS))));
+    }
+    return out;
+  });
+  return factors.get(rosterId) ?? 1;
+}
+
+/** A team's score distribution for a week: its best lineup, scaled by how its manager sets lineups (unless `asOptimized`). */
+function teamDist(core: LeagueCore, rosterId: number, week: number, asOptimized = false): TeamWeekDist {
   const l = core.bestByWeek.get(`${rosterId}:${week}`);
   if (!l) return { mean: 0, sd: 25 };
-  // Player errors are close to independent across NFL teams; add a small common-mode term.
-  return { mean: l.expected, sd: Math.sqrt(l.sd ** 2 + (0.03 * l.expected) ** 2) };
+  return lineupDist(l, asOptimized ? 1 : managerFactor(core, rosterId));
 }
+
+// Player errors are close to independent across NFL teams; add a small common-mode term.
+const lineupDist = (l: { expected: number; sd: number }, factor: number): TeamWeekDist =>
+  ({ mean: l.expected * factor, sd: Math.sqrt(l.sd ** 2 + (0.03 * l.expected * factor) ** 2) });
 
 function seasonSim(core: LeagueCore) {
   return once(core, 'seasonSim', () => {
@@ -187,6 +217,10 @@ function matchupPairs(ms: readonly SleeperMatchup[]): [SleeperMatchup, SleeperMa
 
 export async function bootstrap(id: string) {
   const core = await getCore(id);
+  return once(core, 'bootstrap', () => bootstrapView(core));
+}
+
+function bootstrapView(core: LeagueCore) {
   const nonzero = Object.entries(core.league.scoring).filter(([, v]) => v !== 0);
   return {
     league: {
@@ -216,6 +250,10 @@ export async function bootstrap(id: string) {
 
 export async function overview(id: string) {
   const core = await getCore(id);
+  return once(core, 'overview', () => overviewView(core));
+}
+
+async function overviewView(core: LeagueCore) {
   const sim = seasonSim(core);
   const pw = power(core);
   const standings = core.teams.map(t => {
@@ -233,7 +271,7 @@ export async function overview(id: string) {
   }).sort((a, b) => b.wins - a.wins || a.losses - b.losses || b.pointsFor - a.pointsFor);
   return {
     standings,
-    matchups: core.week !== null && core.week <= core.lastRegularWeek ? (await matchups(id, core.week)).games : [],
+    matchups: core.week !== null && core.week <= core.lastRegularWeek ? (await once(core, `matchups:${core.week}`, () => matchupsView(core, core.week!))).games : [],
     lastWeek: core.results.length ? weekRecap(core, core.results[core.results.length - 1]) : null,
     awards: seasonAwards(core.results, core.summaries, core.players, pickups(core)).slice(0, 6),
     transactions: transactionsView(core).slice(0, 8),
@@ -260,6 +298,11 @@ function weekRecap(core: LeagueCore, rows: TeamWeek[]) {
 export async function matchups(id: string, requestedWeek?: number) {
   const core = await getCore(id);
   const week = requestedWeek ?? core.week ?? core.lastScored;
+  return once(core, `matchups:${week}`, () => matchupsView(core, week));
+}
+
+async function matchupsView(core: LeagueCore, week: number) {
+  const id = core.id;
   const ms = core.schedule.get(week) ?? (await sourceFor(id).matchups(week).catch(() => []));
   const isPast = week <= core.lastScored;
   const isCurrent = week === core.week;
@@ -296,7 +339,7 @@ export async function matchups(id: string, requestedWeek?: number) {
         const key1 = `${week}:${a.rosterId}:${b.rosterId}`, key2 = `${week}:${b.rosterId}:${a.rosterId}`;
         winProb = sim?.gameWinProb.get(key1) ?? (sim?.gameWinProb.has(key2) ? 1 - sim.gameWinProb.get(key2)! : null);
       }
-      const da = teamDist(core, a.rosterId, week), db = teamDist(core, b.rosterId, week);
+      const da = teamDist(core, a.rosterId, week, true), db = teamDist(core, b.rosterId, week, true);
       optimizedWinProb = normalCdf((da.mean - db.mean) / Math.sqrt(da.sd ** 2 + db.sd ** 2 || 1));
     }
     return {
@@ -313,6 +356,11 @@ export async function team(id: string, rosterId: number) {
   const core = await getCore(id);
   const t = core.teams.find(x => x.rosterId === rosterId);
   if (!t) throw new HttpError(404, 'Team not found');
+  return once(core, `team:${rosterId}`, () => teamPage(core, t));
+}
+
+function teamPage(core: LeagueCore, t: LeagueCore['teams'][number]) {
+  const rosterId = t.rosterId;
   const sim = seasonSim(core).teams.find(x => x.rosterId === rosterId)!;
   const s = core.summaries.get(rosterId)!;
   const roster = t.roster.players.map(pid => playerRow(core, pid)).filter(r => r.name);
@@ -354,11 +402,16 @@ export async function lineup(id: string, rosterId: number) {
   const t = core.teams.find(x => x.rosterId === rosterId);
   const adv = core.advice.get(rosterId);
   if (!t || !adv) throw new HttpError(404, 'Team not found');
-  const f = core.forecasts.get(core.week)!;
+  return once(core, `lineup:${rosterId}`, () => lineupView(core, core.week!, t, adv));
+}
+
+function lineupView(core: LeagueCore, week: number, t: LeagueCore['teams'][number], adv: NonNullable<ReturnType<LeagueCore['advice']['get']>>) {
+  const id = core.id, rosterId = t.rosterId;
+  const f = core.forecasts.get(week)!;
   const bench = t.roster.players.filter(pid => !adv.optimal.ids.includes(pid) && !core.taxiOrIr.has(pid));
   const row = (pid: string | null) => (pid ? { ...playerRow(core, pid), locked: core.isLocked(pid) } : null);
   // Head-to-head odds against the opponent as set vs. as optimised.
-  const ms = core.schedule.get(core.week) ?? [];
+  const ms = core.schedule.get(week) ?? [];
   const me = ms.find(m => m.rosterId === rosterId);
   const opp = me && me.matchupId !== null ? ms.find(m => m.matchupId === me.matchupId && m.rosterId !== rosterId) : undefined;
   let odds: { asSet: number; optimized: number; opponent: number } | null = null;
@@ -366,13 +419,13 @@ export async function lineup(id: string, rosterId: number) {
     const outcomes = (ids: (string | null)[]) => ids.filter((x): x is string => !!x).map(pid => f.get(pid)).filter((x): x is WeekForecast => !!x).map(outcomeOf);
     const oppIds = opp.starters.map(s => (s === '0' ? null : s));
     odds = {
-      asSet: pct(simulateMatchup(outcomes(adv.current.ids), outcomes(oppIds), `${id}:${core.week}:set:${rosterId}`, 6000).winProbA),
-      optimized: pct(simulateMatchup(outcomes(adv.optimal.ids), outcomes(oppIds), `${id}:${core.week}:opt:${rosterId}`, 6000).winProbA),
+      asSet: pct(simulateMatchup(outcomes(adv.current.ids), outcomes(oppIds), `${id}:${week}:set:${rosterId}`, 6000).winProbA),
+      optimized: pct(simulateMatchup(outcomes(adv.optimal.ids), outcomes(oppIds), `${id}:${week}:opt:${rosterId}`, 6000).winProbA),
       opponent: opp.rosterId,
     };
   }
   return {
-    week: core.week,
+    week,
     slots: core.slots,
     current: adv.current.ids.map(row),
     optimal: adv.optimal.ids.map(row),
@@ -408,7 +461,7 @@ function transactionsView(core: LeagueCore) {
 
 export async function transactions(id: string) {
   const core = await getCore(id);
-  return { transactions: transactionsView(core) };
+  return once(core, 'transactions', () => ({ transactions: transactionsView(core) }));
 }
 
 export async function waivers(id: string, rosterId: number) {
@@ -462,6 +515,10 @@ export async function waivers(id: string, rosterId: number) {
 
 export async function playoffs(id: string) {
   const core = await getCore(id);
+  return once(core, 'playoffsView', () => playoffsView(core));
+}
+
+function playoffsView(core: LeagueCore) {
   const sim = seasonSim(core);
   const pw = power(core);
   return {
@@ -487,6 +544,10 @@ export async function playoffs(id: string) {
 
 export async function powerView(id: string) {
   const core = await getCore(id);
+  return once(core, 'powerView', () => powerPage(core));
+}
+
+function powerPage(core: LeagueCore) {
   const pw = power(core);
   // Performance-only power after each completed week, for the trend chart.
   const history: { week: number; ranks: { rosterId: number; score: number; rank: number }[] }[] = [];
@@ -535,6 +596,10 @@ export async function player(id: string, playerId: string) {
   const core = await getCore(id);
   const p = core.players[playerId];
   if (!p) throw new HttpError(404, 'Player not found');
+  return once(core, `player:${playerId}`, () => playerPage(core, playerId, p));
+}
+
+function playerPage(core: LeagueCore, playerId: string, p: LeagueCore['players'][string]) {
   const scoring = compileScoring(core.league.scoring);
   const log = (byWeek: Map<number, Map<string, { stats: Stats; opponent: string | null; team: string | null }>>, season: number) =>
     [...byWeek].sort((a, b) => a[0] - b[0]).flatMap(([week, lines]) => {
@@ -592,7 +657,7 @@ export async function trade(id: string, body: { a: number; b: number; aGives: st
       const ids = [...active(t).filter(pid => !side.gives.includes(pid)), ...side.gets];
       for (const w of weeks) {
         const l = bestLineup(core.slots, ids, core.players, core.forecasts.get(w)!);
-        override.set(`${t.rosterId}:${w}`, { mean: l.expected, sd: Math.sqrt(l.sd ** 2 + (0.03 * l.expected) ** 2) });
+        override.set(`${t.rosterId}:${w}`, lineupDist(l, managerFactor(core, t.rosterId)));
       }
     }
     const remaining: { week: number; a: number; b: number }[] = [];
@@ -633,6 +698,10 @@ export async function trade(id: string, body: { a: number; b: number; aGives: st
 
 export async function recap(id: string) {
   const core = await getCore(id);
+  return once(core, 'recap', () => recapView(core));
+}
+
+function recapView(core: LeagueCore) {
   const awards = seasonAwards(core.results, core.summaries, core.players, pickups(core));
   const weekly = core.results.map(rows => ({
     week: rows[0]?.week ?? 0,
@@ -754,9 +823,10 @@ export function model(leagueId = 'default') {
   let data = reports.get(key);
   if (!data) {
     try { data = JSON.parse(readFileSync(reportFile, 'utf8')) as Record<string, unknown>; } catch { data = {}; }
+    data = { ...data, key };
     reports.set(key, data);
   }
-  return { ...data, key };
+  return data as Record<string, unknown> & { key: string };
 }
 
 export class HttpError extends Error {
@@ -792,13 +862,15 @@ export async function defense(id: string, requestedSeason?: number): Promise<Def
     };
   };
   if (season === core.season) return once(core, `defense:${season}`, compute);
-  const key = `${id}:${season}`;
-  let cachedPrev = pastDefense.get(key);
-  if (!cachedPrev) { cachedPrev = compute(); pastDefense.set(key, cachedPrev); }
-  // The "this week" opponents still come from the live schedule.
-  const upcoming: Record<string, string> = {};
-  if (core.week !== null) for (const g of core.games.filter(x => x.week === core.week)) { upcoming[g.home] = g.away; upcoming[g.away] = g.home; }
-  return { ...cachedPrev, week: core.week, upcoming };
+  return once(core, `defense:${season}`, () => {
+    const key = `${id}:${season}`;
+    let cachedPrev = pastDefense.get(key);
+    if (!cachedPrev) { cachedPrev = compute(); pastDefense.set(key, cachedPrev); }
+    // The "this week" opponents still come from the live schedule.
+    const upcoming: Record<string, string> = {};
+    if (core.week !== null) for (const g of core.games.filter(x => x.week === core.week)) { upcoming[g.home] = g.away; upcoming[g.away] = g.home; }
+    return { ...cachedPrev, week: core.week, upcoming };
+  });
 }
 interface DefenseView { season: number; seasons: number[]; week: number | null; throughWeek: number; weeks: number[]; upcoming: Record<string, string>; groups: Record<string, DefenseRow[]> }
 /** Past seasons never change, so their tables are shared across core rebuilds. */
@@ -811,8 +883,16 @@ const pastDefense = new Map<string, DefenseView>();
 onCoreBuilt(core => {
   const id = core.id;
   void (async () => {
-    for (const view of [() => overview(id), () => players(id), () => powerView(id), () => playoffs(id), () => defense(id)]) {
-      try { await view(); } catch { /* best effort */ }
+    // First paint needs bootstrap + overview (+ this week's matchups): encode and compress those too.
+    const views: [() => Promise<object>, boolean][] = [
+      [() => bootstrap(id), true], [() => overview(id), true], [() => matchups(id), true],
+      [() => players(id), false], [() => powerView(id), false], [() => playoffs(id), false], [() => defense(id), false], [() => history(id), false],
+    ];
+    for (const [view, encode] of views) {
+      try {
+        const data = await view();
+        if (encode) prepare(data);
+      } catch { /* best effort */ }
       await new Promise<void>(resolve => setImmediate(resolve));
     }
   })();

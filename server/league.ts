@@ -6,13 +6,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { MINUTE } from './cache.ts';
 import {
-  linesSignature, nflGames, sleeper, sleeperSchedule, weekProjections, weekStats,
+  lineSignature, linesSignature, nflGames, sleeper, sleeperSchedule, weekProjections, weekStats,
   type SleeperLeague, type SleeperMatchup, type SleeperRoster, type SleeperTransaction, type SleeperUser, type WeekLine,
 } from './sleeper.ts';
 import { sourceFor, type LeagueExtras, type Platform } from './source.ts';
 import { defenseRows, fitDefenseModel, type DefenseModel } from '../engine/dst.ts';
 import { FeatureState } from '../engine/features.ts';
-import { forecastPlayer, type ForecastEnv, type WeekForecast } from '../engine/forecast.ts';
+import { pregameForecast, withLiveState, type ForecastEnv, type WeekForecast } from '../engine/forecast.ts';
 import { adviseLineup, bestLineup, startable, type LineupAdvice, type TeamLineup } from '../engine/lineup.ts';
 import { ProjectionModel, type ModelFile } from '../engine/model.ts';
 import { starterSlots } from '../engine/positions.ts';
@@ -158,6 +158,10 @@ interface Inputs {
   transactions: SleeperTransaction[];
   warnings: string[];
   fingerprint: string;
+  /** Identifies the NFL schedule and betting lines in use (shared by every forecast). */
+  gamesTag: number;
+  /** Content signatures of this season's completed weeks (stats, projections). */
+  pastSignatures: string;
 }
 
 async function loadInputs(id: string): Promise<Inputs> {
@@ -196,12 +200,13 @@ async function loadInputs(id: string): Promise<Inputs> {
   // Everything that can change a number on screen. Unchanged fingerprint → reuse the last core.
   const now = Date.now();
   const kickedOff = week === null ? 0 : games.filter(g => g.week === week && g.kickoff !== null && g.kickoff <= now).length;
+  const pastSignatures = [...curStats, ...curProj].map(linesSignature).join(',');
   const fingerprint = [
     tagOf(players), tagOf(allGames),
     JSON.stringify([league.week, league.lastScoredWeek, league.status, league.scoring, league.rosterPositions, league.name]),
     JSON.stringify(rosters), JSON.stringify(users),
     JSON.stringify(schedule.map(ms => ms.map(m => [m.rosterId, m.matchupId, m.points, m.starters]))),
-    [...curStats, ...curProj, ...futureProj, liveStats].map(linesSignature).join(','),
+    pastSignatures, [...futureProj, liveStats].map(linesSignature).join(','),
     JSON.stringify(liveSchedule.filter(g => g.week === week)), kickedOff,
     transactions.length ? `${transactions.length}:${transactions[0].created}` : '0',
   ].join('|');
@@ -209,12 +214,61 @@ async function loadInputs(id: string): Promise<Inputs> {
   return {
     platform: src.platform, extras, state, league, users, rosters, players, games, week, lastScored, lastRegular, last, horizon, seasonOver, pastWeeks, prevWeeks,
     prevStats, prevProj, curStats, curProj, futureProj, liveStats, schedule, trending, liveSchedule, transactions, warnings, fingerprint,
+    gamesTag: tagOf(allGames), pastSignatures,
   };
+}
+
+/** Everything learned from completed games: the feature state and the D/ST residual model. */
+interface History { key: string; state: FeatureState; defense: DefenseModel | null }
+const histories = new Map<string, History>();
+
+interface PregameMemo { context: string; weeks: Map<number, Map<string, { key: string; forecast: WeekForecast }>> }
+const pregameMemo = new Map<string, PregameMemo>();
+
+/**
+ * Replays last season and this season's completed weeks into a FeatureState. Only a stat
+ * correction, a newly final week or a new player catalogue changes it, so it is kept between
+ * rebuilds. (Last season's weeks are immutable, cached-forever objects: identity is enough.)
+ */
+async function historyFor(id: string, input: Inputs, scoring: [string, number][], hasDefense: boolean): Promise<History> {
+  const { league, prevWeeks, pastWeeks, prevStats, prevProj, curStats, curProj, extras } = input;
+  const season = league.season;
+  const key = [
+    season, hasDefense, tagOf(input.players), JSON.stringify(scoring), input.pastSignatures,
+    prevStats.map(tagOf).join(','), prevProj.map(tagOf).join(','),
+    JSON.stringify(Object.values(extras.players).map(p => [p.id, p.pos, p.birthDate, p.yearsExp])),
+  ].join('|');
+  const hit = histories.get(id);
+  if (hit?.key === key) return hit;
+
+  const meta = (pid: string) => {
+    const p = extras.players[pid] ?? input.players[pid];
+    return p ? { pos: p.pos, birthDate: p.birthDate, yearsExp: p.yearsExp } : undefined;
+  };
+  const projStatsMap = (lines: WeekLine[]) => new Map(lines.filter(l => hasForecast(l.stats)).map(l => [l.id, l.stats]));
+  const state = new FeatureState(scoring, meta);
+  state.startSeason(season - 1);
+  for (let i = 0; i < prevWeeks.length; i++) {
+    state.ingestWeek(season - 1, prevWeeks[i], prevStats[i], projStatsMap(prevProj[i]));
+    if (i % 3 === 2) await tick();
+  }
+  state.startSeason(season);
+  for (let i = 0; i < pastWeeks.length; i++) state.ingestWeek(season, pastWeeks[i], curStats[i], projStatsMap(curProj[i]));
+  state.clearAverages();
+  await tick();
+  // Team defenses: residual spread from every D/ST game on record (last season plus this one so far).
+  const defense = hasDefense ? fitDefenseModel(defenseRows(
+    [...prevWeeks.map((_, i) => ({ stats: prevStats[i], projections: projStatsMap(prevProj[i]) })), ...pastWeeks.map((_, i) => ({ stats: curStats[i], projections: projStatsMap(curProj[i]) }))],
+    pid => input.players[pid]?.pos === 'DEF', scoring,
+  )) : null;
+  const history = { key, state, defense };
+  histories.set(id, history);
+  return history;
 }
 
 async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
   const { league, users, rosters, games, week, lastScored, lastRegular, last, horizon, pastWeeks, prevWeeks,
-    prevStats, prevProj, curStats, curProj, futureProj, liveStats, schedule, liveSchedule, warnings } = input;
+    prevStats, curStats, curProj, futureProj, liveStats, schedule, liveSchedule, warnings } = input;
   const season = league.season;
   const scoring = compileScoring(league.scoring);
   const slots = starterSlots(league.rosterPositions);
@@ -233,21 +287,9 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
   for (const g of games) { gameIndex.set(`${g.week}:${g.home}`, g); gameIndex.set(`${g.week}:${g.away}`, g); }
   const gameFor = (team: string, w: number) => gameIndex.get(`${w}:${team}`);
 
-  const fs = new FeatureState(scoring, pid => {
-    const p = players[pid];
-    return p ? { pos: p.pos, birthDate: p.birthDate, yearsExp: p.yearsExp } : undefined;
-  });
   const toMap = (lines: WeekLine[]) => new Map(lines.map(l => [l.id, l]));
-  const projStatsMap = (lines: WeekLine[]) => new Map(lines.filter(l => hasForecast(l.stats)).map(l => [l.id, l.stats]));
-  fs.startSeason(season - 1);
-  for (let i = 0; i < prevWeeks.length; i++) {
-    fs.ingestWeek(season - 1, prevWeeks[i], prevStats[i], projStatsMap(prevProj[i]));
-    if (i % 3 === 2) await tick();
-  }
-  fs.startSeason(season);
-  for (let i = 0; i < pastWeeks.length; i++) fs.ingestWeek(season, pastWeeks[i], curStats[i], projStatsMap(curProj[i]));
-  fs.clearAverages();
-  await tick();
+  const hasDefense = slots.includes('DEF');
+  const history = await historyFor(id, input, scoring, hasDefense);
 
   const projectionsByWeek = new Map<number, Map<string, WeekLine>>();
   horizon.forEach((w, i) => projectionsByWeek.set(w, toMap(futureProj[i])));
@@ -274,12 +316,8 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
   };
   const liveMap = new Map<string, Stats>(liveStats.map(l => [l.id, l.stats]));
   const { model, key: modelKeyUsed } = modelFor(id);
-  // Team defenses: residual spread from every D/ST game on record (last season plus this one so far).
-  const hasDefense = slots.includes('DEF');
-  const defenseModel = hasDefense ? fitDefenseModel(defenseRows(
-    [...prevWeeks.map((_, i) => ({ stats: prevStats[i], projections: projStatsMap(prevProj[i]) })), ...pastWeeks.map((_, i) => ({ stats: curStats[i], projections: projStatsMap(curProj[i]) }))],
-    pid => input.players[pid]?.pos === 'DEF', scoring,
-  )) : null;
+  const fs = history.state;
+  const defenseModel = history.defense;
   const env: ForecastEnv = {
     model, state: fs, season, currentWeek: week ?? last + 1, players, scoring, gameFor,
     projections: w => projectionsByWeek.get(w), liveStats: liveMap, gameStatus, defense: defenseModel, now,
@@ -303,22 +341,45 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
   });
 
   // Everyone gets the next two weeks; later weeks only for players who could matter to a lineup.
+  // A player's pregame forecast is reused from the last rebuild unless one of its inputs changed,
+  // so live scoring updates on game days only redo the (cheap) in-game overlay.
+  const memoContext = `${history.key}|${input.gamesTag}|${week}|${modelKeyUsed}`;
+  const previous = pregameMemo.get(id);
+  const reuse = previous?.context === memoContext ? previous.weeks : null;
+  const memo: PregameMemo = { context: memoContext, weeks: new Map() };
   const forecasts = new Map<number, Map<string, WeekForecast>>();
   let longHorizon = relevant;
+  let computed = 0;
   for (let i = 0; i < horizon.length; i++) {
     const w = horizon[i];
     if (i === 2) {
       longHorizon = relevant.filter(pid => ownerOf.has(pid) || Math.max(forecasts.get(horizon[0])?.get(pid)?.expected ?? 0, forecasts.get(horizon[1])?.get(pid)?.expected ?? 0) >= 1.5);
     }
     const m = new Map<string, WeekForecast>();
+    const kept = new Map<string, { key: string; forecast: WeekForecast }>();
+    const before = reuse?.get(w);
+    const projections = projectionsByWeek.get(w);
     const ids = i < 2 ? relevant : longHorizon;
     for (let k = 0; k < ids.length; k++) {
-      m.set(ids[k], forecastPlayer(env, ids[k], w));
-      if (k % 400 === 399) await tick();
+      const pid = ids[k];
+      const p = players[pid];
+      const line = projections?.get(pid);
+      const key = `${p.pos}|${p.team}|${p.injuryStatus}|${line ? lineSignature(line) : '-'}`;
+      const hit = before?.get(pid);
+      let pre: WeekForecast;
+      if (hit && hit.key === key) pre = hit.forecast;
+      else {
+        pre = pregameForecast(env, pid, w);
+        if (++computed % 400 === 0) await tick();
+      }
+      kept.set(pid, { key, forecast: pre });
+      m.set(pid, w === week ? withLiveState(env, pre) : pre);
     }
+    memo.weeks.set(w, kept);
     forecasts.set(w, m);
-    await tick();
   }
+  pregameMemo.set(id, memo);
+  await tick();
 
   const isLocked = (pid: string) => {
     if (week === null) return true;
@@ -395,13 +456,23 @@ function rebuild(id: string): Promise<LeagueCore> {
       }
       const core = await computeCore(id, input);
       cores.set(id, { core, at: Date.now(), fingerprint: input.fingerprint });
-      if (cores.size > 20) cores.delete(cores.keys().next().value!);
+      if (cores.size > 20) {
+        const evicted = cores.keys().next().value!;
+        cores.delete(evicted);
+        histories.delete(evicted);
+        pregameMemo.delete(evicted);
+      }
       for (const l of listeners) { try { l(core); } catch { /* warming is best-effort */ } }
       return core;
     })().finally(() => rebuilding.delete(id));
     rebuilding.set(id, p);
   }
   return p;
+}
+
+/** Re-check inputs now, bypassing the freshness window (scripts and benchmarks). */
+export function refreshCore(id: string): Promise<LeagueCore> {
+  return rebuild(id);
 }
 
 function isLive(core: LeagueCore): boolean {

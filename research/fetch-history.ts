@@ -6,13 +6,22 @@
  */
 import { writeFile, mkdir, access } from 'node:fs/promises';
 import path from 'node:path';
-import { nflGames, sleeper, weekProjections, weekStats } from '../server/sleeper.ts';
+import { nflGames, sleeper, sleeperSchedule, weekProjections, weekStats, type NflState } from '../server/sleeper.ts';
 
 export const RESEARCH_DIR = import.meta.dirname;
 export const RAW_DIR = path.join(RESEARCH_DIR, 'cache');
 export const FIRST_SEASON = 2020;
 
 export const weeksIn = (season: number) => (season <= 2020 ? 17 : 18);
+
+/**
+ * Last week of the current season with every game final. Sleeper's state only rolls to the
+ * next week mid-week, so a finished Monday night would otherwise wait a day or two.
+ */
+export async function completedThrough(state: NflState): Promise<number> {
+  const games = (await sleeperSchedule(state.season).catch(() => [])).filter(g => g.week === state.week);
+  return games.length && games.every(g => g.status === 'complete') ? state.week : state.week - 1;
+}
 
 async function download(url: string, file: string) {
   try {
@@ -30,7 +39,8 @@ async function main() {
   const state = await sleeper.state();
   const currentSeason = state.season;
   const currentWeek = state.week;
-  console.log(`NFL state: ${currentSeason} week ${currentWeek}`);
+  const done = await completedThrough(state);
+  console.log(`NFL state: ${currentSeason} week ${currentWeek} (final through week ${done})`);
 
   const players = await sleeper.players();
   console.log(`players: ${Object.keys(players).length}`);
@@ -42,18 +52,18 @@ async function main() {
     const last = season < currentSeason ? weeksIn(season) : Math.min(weeksIn(season), currentWeek);
     for (let week = 1; week <= last; week++) jobs.push({ season, week });
   }
-  let done = 0;
+  let fetched = 0;
   await Promise.all(Array.from({ length: 6 }, async () => {
     while (jobs.length) {
       const job = jobs.shift()!;
       const f = { ...job, currentSeason, currentWeek };
       // Projections for the current week are needed; stats only exist for completed weeks.
       const [stats, proj] = await Promise.all([
-        job.season === currentSeason && job.week >= currentWeek ? Promise.resolve([]) : weekStats(f),
+        job.season === currentSeason && job.week > done ? Promise.resolve([]) : weekStats(f),
         weekProjections(f),
       ]);
-      done++;
-      if (done % 10 === 0 || !stats.length) console.log(`${job.season} w${job.week}: ${stats.length} stat rows, ${proj.length} projection rows (${done} done)`);
+      fetched++;
+      if (fetched % 10 === 0 || !stats.length) console.log(`${job.season} w${job.week}: ${stats.length} stat rows, ${proj.length} projection rows (${fetched} done)`);
     }
   }));
 

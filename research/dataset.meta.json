@@ -1,0 +1,39 @@
+{
+ "league": "1312656463549726720",
+ "name": "Neighbas in Paris",
+ "key": "default",
+ "slots": [
+  "QB",
+  "RB",
+  "RB",
+  "RB",
+  "WR",
+  "WR",
+  "WR",
+  "WR",
+  "TE",
+  "SUPER_FLEX",
+  "K",
+  "DL",
+  "DL",
+  "DL",
+  "LB",
+  "LB",
+  "LB",
+  "LB",
+  "DB",
+  "DB",
+  "DB"
+ ],
+ "teams": 6,
+ "cohort": {
+  "QB": 22,
+  "RB": 37,
+  "WR": 49,
+  "TE": 12,
+  "K": 12,
+  "DL": 36,
+  "LB": 48,
+  "DB": 36
+ }
+}

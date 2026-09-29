@@ -1,6 +1,6 @@
 /**
  * Player value in this league's economy:
- *  - ROS: expected points per remaining week (byes and injury odds included)
+ *  - ROS: expected points per remaining week (byes, current injuries and the odds of new ones)
  *  - VORP: above the replacement level actually available on the waiver wire
  *  - Dynasty: VORP carried over four seasons through a position age curve
  */
@@ -55,7 +55,8 @@ export function computeValues(args: {
     for (const w of weeks) {
       const f = forecasts.get(w)?.get(id);
       if (!f || f.bye) continue;
-      total += f.expected;
+      // Season-long value carries the chance of an injury or benching before each week.
+      total += f.rosPlay * f.mean;
       healthy += f.mean;
       n++;
     }

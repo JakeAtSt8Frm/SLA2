@@ -41,7 +41,7 @@ export default function ModelLab() {
 
       <div className="grid gap-5 lg:grid-cols-2">
         <MetricTable title="2025 holdout (never seen in training)" m={r.holdout2025} />
-        {r.live2026 ? <MetricTable title="2026 so far (model trained through 2025)" m={r.live2026} note="Only two weeks. Treat as a smoke test, not evidence." /> : <Card><Empty title="No 2026 weeks scored yet" /></Card>}
+        {r.live2026 ? <MetricTable title="2026 so far (model trained through 2025)" m={r.live2026} note={r.live2026Weeks && r.live2026Weeks.length >= 6 ? undefined : `Only ${r.live2026Weeks?.length ?? 'a few'} weeks. Treat as a smoke test, not evidence.`} /> : <Card><Empty title="No 2026 weeks scored yet" /></Card>}
       </div>
 
       {bt && (
@@ -82,7 +82,13 @@ export default function ModelLab() {
             <table className="tbl num text-[13px]">
               <thead><tr><th>Designation</th><th className="r">Played</th><th className="r">Sample</th></tr></thead>
               <tbody>
-                {([['No designation', r.availability.none, null], ['Questionable', r.availability.Questionable, r.availability.n.Questionable], ['Doubtful', r.availability.Doubtful, r.availability.n.Doubtful], ['Out / IR / Suspended', 0, r.availability.n.Out]] as const).map(([k, v, n]) => (
+                {([
+                  ['No designation', r.availability.none, null],
+                  ...(r.availability.roles?.Questionable
+                    ? [['Questionable · starter', r.availability.roles.Questionable.starter, null], ['Questionable · reserve', r.availability.roles.Questionable.reserve, null]] as const
+                    : [['Questionable', r.availability.Questionable, r.availability.n.Questionable]] as const),
+                  ['Doubtful', r.availability.Doubtful, r.availability.n.Doubtful], ['Out / IR / Suspended', 0, r.availability.n.Out],
+                ] as const).map(([k, v, n]) => (
                   <tr key={k}><td>{k}</td><td className="r font-semibold">{pct(v, 1)}</td><td className="r text-ink-2">{n ? n.toLocaleString('en-US') : '—'}</td></tr>
                 ))}
               </tbody>

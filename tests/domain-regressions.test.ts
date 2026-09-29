@@ -11,7 +11,7 @@ const player = (id: string, eligible: Pos[]): PlayerInfo => ({
   depthOrder: 1, searchRank: 100, number: 1, college: null, newsUpdated: null,
 });
 const forecast = (id: string, expected: number, week: number): WeekForecast => ({
-  id, week, mean: expected, play: 1, expected, provider: expected, floor: expected,
+  id, week, mean: expected, play: 1, rosPlay: 1, expected, provider: expected, floor: expected,
   median: expected, ceiling: expected, opponent: 'Y', home: true, kickoff: null, bye: false,
   residuals: new Array(21).fill(0), live: null,
 });

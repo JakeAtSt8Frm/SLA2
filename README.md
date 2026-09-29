@@ -66,26 +66,39 @@ npm run verify:espn      # rescoring ESPN leagues from stat lines vs ESPN’s of
    and trend, per-snap tackle/big-play rates, projection-beating history, opponent points allowed,
    opponent pace, Vegas implied totals and spreads, rest, venue and age. It predicts points *if the player
    plays*, with monotonic constraints so better recent production can never lower a forecast.
-3. **Availability** comes from the injury tag, measured on 2020–25 official reports: Questionable players
-   played 67.5% of the time, Doubtful 0.9%, Out 0.35%.
+3. **Availability** comes from the injury tag, measured on 2020–26 official reports: Questionable starters
+   (≥50% of recent snaps) played 72.5% of the time and Questionable reserves 60.5%, Doubtful 0.9%, Out 0.35%.
+   Season-long value also counts the chance of getting hurt or benched before each future week: a healthy
+   starter plays the next week 93% of the time and eight weeks out only 83% (QBs 76%). Lineup planning
+   keeps healthy availability, because a roster covers an injured starter from the bench.
 4. **Uncertainty**: floors, ceilings, boom/bust and every simulation use out-of-sample residual
    distributions by position and projection level (80% bands cover 76–81% of 2025 outcomes).
+5. **Season projections** (playoff odds, schedule, trade impact) scale each team's best lineup by how well
+   its manager actually sets lineups (share of hindsight-optimal points started, relative to the league,
+   shrunk toward average with six weeks of prior). Managers in this league started 68–97% of their best
+   lineup's value, and the rate carries over within a season.
 
 ### Measured accuracy (2025 held out; trained 2020–24)
 
 | On realistic start/sit candidates (4,536 player-games) | MAE | Pairs ordered right | Close calls (≤3 pts) |
 |---|---|---|---|
-| **SLA model** | **6.18** | **59.5%** | **56.6%** |
+| **SLA model** | **6.18** | **59.4%** | **56.5%** |
 | Sleeper projection, rescored for the league | 6.31 | 58.4% | 54.8% |
 | SLA 1.0-style linear recalibration | 6.24 | 58.4% | 54.8% |
 | Recent form only | 6.43 | 57.6% | 54.6% |
 
-The MAE gain over Sleeper is significant (95% CI −0.18 to −0.05 points) and concentrated in IDP, where the
-provider underrates sacks, INTs and pass breakups. On this league’s real 2025 rosters, model-set lineups
-scored **+27 pts/week over what managers actually started**. Versus lineups set from Sleeper’s own numbers
-the edge is +1.6 pts/week, which is too small to be statistically certain over one season
-(95% CI −3.0 to +6.3). Honest bottom line: most of the win comes from always fielding the best legal,
+The MAE gain over Sleeper is significant (95% CI −0.19 to −0.07 points) and concentrated in IDP, where the
+provider underrates sacks, INTs and pass breakups. 2026 weeks 1–3 (model trained through 2025): MAE 6.41 vs
+6.47, pairs ordered right 60.4% vs 58.3%. On this league’s real 2025 rosters, model-set lineups
+scored **+28 pts/week over what managers actually started**. Versus lineups set from Sleeper’s own numbers
+the edge is +2.9 pts/week, which is too small to be statistically certain over one season
+(95% CI −0.9 to +6.9). Honest bottom line: most of the win comes from always fielding the best legal,
 injury-aware lineup across all 21 slots; the model adds a real but modest edge on top, mostly at DL/LB/DB.
+
+Tried in September 2026 and not adopted, because none held up on 2025 and 2026 after tuning on 2023–24:
+weighting recent seasons more, season-to-date provider-bias features (league-wide by position, by team,
+by opponent), other tree settings, a per-position recalibration of the output, and a per-position strength
+for the model's correction. Elite DL remain under-predicted by about 1 point per game.
 
 ### ESPN leagues
 
@@ -100,11 +113,11 @@ D/ST ladder gets the *probability* of each bucket, not the one bucket the projec
   reproduces ESPN’s official points exactly, and all 202 team totals. `tests/fixtures/espn-parity.json`
   keeps 411 of them as a unit test.
 - **Models:** each league has its own model trained on its scoring (offense and kickers; no IDP). The trees’
-  correction to the provider is shrunk by a factor chosen on 2024 (0.5 for both). 2025 holdout MAE:
-  O.J. **5.33 vs 5.36** for the rescored provider projection (95% CI of the gap −0.06 to −0.01),
-  UK-BG **5.70 vs 5.72** (−0.05 to 0.00). That edge is small. Without IDP, Sleeper’s projections are already
-  good. On the O.J.’s real 2025 rosters, model lineups beat provider lineups by +0.1 pts/week (not
-  significant) and what managers actually started by +4.6 pts/week.
+  correction to the provider is shrunk by a factor chosen on 2024 (O.J. 0.75, UK-BG 0.5). 2025 holdout MAE:
+  O.J. **5.32 vs 5.36** for the rescored provider projection (95% CI of the gap −0.08 to −0.00),
+  UK-BG **5.70 vs 5.72** (−0.06 to 0.00). That edge is small. Without IDP, Sleeper’s projections are already
+  good. On the O.J.’s real 2025 rosters, model lineups and provider lineups are a wash (−0.3 pts/week,
+  95% CI −1.0 to +0.3), and both beat what managers actually started by about +4 pts/week.
 - **D/STs** use the rescored projection as the mean with the residual spread of every D/ST game since
   last season. A least-squares recalibration was tested out of sample and didn’t help.
 - **Credentials** live in `config/espn.json` (`swid`, `espn_s2`, league list), overridable with `ESPN_SWID` and
@@ -124,10 +137,13 @@ engine/     Pure TypeScript domain logic shared by server and research
             scoring · features · model runtime · forecasts · optimizer · lineups · simulations
             · values · waivers · trades · power · recap
 server/     Hono API: Sleeper/nflverse clients with memory+disk caching and stale-while-revalidate,
-            league "core" (every forecast for every remaining week, rebuilt in the background
-            every 90 s), JSON views, pregame snapshot tracking
+            league "core" (every forecast for every remaining week, re-checked every 90 s while games
+            are on; rebuilds are incremental: feature history and each player's pregame forecast are
+            reused unless their inputs changed, so a live scoring update costs ~40 ms instead of ~1 s),
+            JSON views memoised per core and served pre-compressed (brotli) with ETags, pregame
+            snapshot tracking
 web/        React 19 + TanStack Query + Tailwind v4, hand-built SVG charts
-research/   Data fetch, dataset build (same feature code as the server), training, backtest
+research/   Data fetch, dataset build (same feature code as the server), training, backtests, review
 model/      model.json / model-<league>.json (exported trees + residual tables) and matching report files
 config/     espn.json: ESPN login cookies and league list (server-side only)
 tests/      Vitest suite incl. Sleeper and ESPN official-score parity fixtures
@@ -140,7 +156,7 @@ TypeScript tree runtime reproduces scikit-learn to within 0.00003 points.
 
 ```bash
 python3 -m venv research/.venv && research/.venv/bin/pip install -r research/requirements.txt
-npm run research       # Sleeper league: fetch → dataset → train (tune 2024, hold out 2025) → backtest
+npm run research       # Sleeper league: fetch → dataset → train (tune 2024, hold out 2025) → backtest → review
 npm run research:espn  # the same for each ESPN league (after research:fetch); writes model/model-espn-*.json
 ```
 
@@ -148,7 +164,13 @@ Any league can be trained on its own: `node research/build-dataset.ts <leagueId>
 `research/.venv/bin/python research/train.py <key>` and `node research/backtest.ts <leagueId>`, where the key is
 `espn-<id>` for ESPN leagues. The server picks up `model/model-<key>.json` automatically.
 
-Run it during the season (e.g. weekly) to fold in new games. Everything is cached, so re-runs take a few minutes.
+Run it during the season (e.g. weekly) to fold in new games. A week counts as soon as all its games are final.
+Everything is cached, so re-runs take a few minutes.
+
+`npm run research:review` (`research/review.py`) is the predicted-vs-actual audit in the league's own scoring,
+every number out of sample: weekly forecasts for last season and this season to date (by position, week and
+forecast level), rest-of-season averages, and team scores on the league's real rosters
+(`research/team-backtest.ts`). It writes `research/review.json`.
 
 ## Deploying
 

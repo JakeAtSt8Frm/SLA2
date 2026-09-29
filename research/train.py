@@ -21,7 +21,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingRegressor
+
+import lab
+from lab import add_baselines, cohort, fit, pair_accuracy
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT.parent / 'model'
@@ -30,118 +32,17 @@ RNG = np.random.default_rng(7)
 # Usage: python train.py [key]. Each league is trained on its own scoring (dataset-<key>.csv).
 KEY = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] != 'default' else ''
 SUFFIX = f'-{KEY}' if KEY else ''
-META = json.loads((ROOT / f'dataset{SUFFIX}.meta.json').read_text()) if (ROOT / f'dataset{SUFFIX}.meta.json').exists() else {}
-
-df = pd.read_csv(ROOT / f'dataset{SUFFIX}.csv', dtype={'player_id': str, 'inj': str})
-# Only positions the league can start (a two-way player listed at DB but eligible at WR would
-# otherwise leave a handful of rows in a position no league slot uses).
-SLOT_POSITIONS = {'QB': ['QB'], 'RB': ['RB'], 'WR': ['WR'], 'TE': ['TE'], 'K': ['K'], 'DL': ['DL'], 'LB': ['LB'], 'DB': ['DB'],
-                  'FLEX': ['RB', 'WR', 'TE'], 'WRRB_FLEX': ['WR', 'RB'], 'REC_FLEX': ['WR', 'TE'], 'SUPER_FLEX': ['QB', 'RB', 'WR', 'TE'], 'IDP_FLEX': ['DL', 'LB', 'DB']}
-if META.get('slots'):
-    startable = {p for s in META['slots'] for p in SLOT_POSITIONS.get(s, [])}
-    df = df[df.pos.isin(startable)].copy()
-df['inj'] = df['inj'].fillna('')
-FEATURES_ALL = [c for c in df.columns if c not in ('season', 'week', 'player_id', 'pos', 'team', 'opp', 'played', 'y', 'inj')]
-# Sleeper's years_exp is frozen for retired players, so it is unreliable historically.
-FEATURES = [f for f in FEATURES_ALL if f not in ('exp',)]
-# Features a league's positions never produce (e.g. tackle stats without IDP) carry no signal.
-FEATURES = [f for f in FEATURES if df[f].notna().any() and df[f].nunique(dropna=True) > 1]
-VEGAS = ['implied', 'opp_implied', 'spread', 'total']
-POSITIONS = [p for p in ['QB', 'RB', 'WR', 'TE', 'K', 'DL', 'LB', 'DB'] if p in set(df.pos.unique())]
-# Twice the league's starting demand per position (the default six-team superflex league counts SF as a QB slot).
-COHORT = META.get('cohort') if KEY else {'QB': 24, 'RB': 36, 'WR': 48, 'TE': 12, 'K': 12, 'DL': 36, 'LB': 48, 'DB': 36}
-COHORT = {p: COHORT.get(p, 12) for p in POSITIONS}
+relevant = lab.setup(KEY)
+df, META, FEATURES, POSITIONS, COHORT = lab.df, lab.META, lab.FEATURES, lab.POSITIONS, lab.COHORT
 print('league', META.get('name', 'default'), 'positions', POSITIONS, 'cohort', COHORT, flush=True)
-
-played = df[df.played == 1].copy()
-# Rows a manager could realistically be deciding on: a provider forecast or a real track record.
-relevant = played[(played.has_proj == 1) | (played.n_l16.fillna(0) >= 2)].copy()
-print(f'rows: all={len(df)} played={len(played)} relevant={len(relevant)}', flush=True)
-
-
-def with_vegas_dropout(frame: pd.DataFrame, rate=0.15) -> pd.DataFrame:
-    """Future weeks have no betting lines yet; teach the trees what to do without them."""
-    frame = frame.copy()
-    mask = RNG.random(len(frame)) < rate
-    frame.loc[mask, VEGAS] = np.nan
-    return frame
-
-
-def base_prediction(frame: pd.DataFrame) -> np.ndarray:
-    """Provider projection when present, else recent form: the offset the trees correct."""
-    base = frame['proj_pts'].to_numpy(copy=True)
-    fallback = frame['ewma'].fillna(frame['mean_prev']).fillna(0).to_numpy()
-    return np.where(np.isnan(base), fallback, base)
-
-
-# Prior knowledge as a constraint: better recent production never lowers the forecast.
-MONOTONIC = {'ewma': 1, 'mean_l16': 1, 'mean_cur': 1, 'mean_l4': 1, 'exp_big_pts': 1, 'big_rate': 1, 'gap_ewma': 1, 'gap_l16': 1, 'gap_big': 1}
-
-
-def fit(train: pd.DataFrame, params: dict, residual: bool, max_iter: int):
-    X = with_vegas_dropout(train)[FEATURES]
-    y = train['y'].to_numpy()
-    target = y - base_prediction(train) if residual else y
-    params = dict(params)
-    if params.pop('monotonic', False):
-        params['monotonic_cst'] = [MONOTONIC.get(f, 0) for f in FEATURES]
-    model = HistGradientBoostingRegressor(loss='squared_error', max_iter=max_iter, random_state=7, early_stopping=False, **params)
-    model.fit(X, target)
-    return model
-
+print(f'rows: all={len(df)} played={int(df.played.sum())} relevant={len(relevant)}', flush=True)
 
 # Share of the trees' correction applied on top of the provider (chosen on the tuning season below).
 SHRINK = 1.0
 
 
 def predict(model, frame: pd.DataFrame, residual: bool) -> np.ndarray:
-    raw = model.predict(frame[FEATURES])
-    return SHRINK * raw + base_prediction(frame) if residual else raw
-
-
-def linear_recalibration(train: pd.DataFrame):
-    """SLA 1.0 style: per-position y = a + b·projection, fit on training seasons."""
-    coefs = {}
-    for pos in POSITIONS:
-        t = train[(train.pos == pos) & (train.has_proj == 1)]
-        if len(t) < 50:
-            coefs[pos] = (0.0, 1.0)
-            continue
-        b, a = np.polyfit(t.proj_pts, t.y, 1)
-        coefs[pos] = (a, b)
-    return coefs
-
-
-def apply_linear(frame: pd.DataFrame, coefs) -> np.ndarray:
-    a = frame.pos.map(lambda p: coefs[p][0]).to_numpy()
-    b = frame.pos.map(lambda p: coefs[p][1]).to_numpy()
-    return a + b * frame.proj_pts.fillna(frame.ewma.fillna(0)).to_numpy()
-
-
-def cohort(frame: pd.DataFrame) -> pd.Series:
-    """Ex-ante decision cohort ranked by provider projection (model-neutral)."""
-    rank = frame.groupby(['season', 'week', 'pos'])['proj_pts'].rank(ascending=False, method='first')
-    limit = frame.pos.map(COHORT)
-    return (frame.has_proj == 1) & (rank <= limit)
-
-
-def pair_accuracy(frame: pd.DataFrame, col: str, close_only=False) -> tuple[float, int]:
-    """Same week, same position: does the model order two options the way they finished?"""
-    hits = total = 0
-    for _, g in frame.groupby(['season', 'week', 'pos']):
-        if len(g) < 2:
-            continue
-        p = g[col].to_numpy()
-        y = g['y'].to_numpy()
-        base = g['proj_pts'].to_numpy()
-        i, j = np.triu_indices(len(g), 1)
-        keep = y[i] != y[j]
-        if close_only:
-            keep &= np.abs(base[i] - base[j]) <= 3
-        i, j = i[keep], j[keep]
-        hits += int(np.sum(np.sign(p[i] - p[j]) == np.sign(y[i] - y[j])))
-        total += len(i)
-    return (hits / total if total else float('nan')), total
+    return lab.predict(model, frame, residual, shrink=SHRINK)
 
 
 def evaluate(frame: pd.DataFrame, cols: dict[str, str]) -> dict:
@@ -176,10 +77,7 @@ def add_predictions(train, test, params, residual, max_iter):
     model = fit(train, params, residual, max_iter)
     test = test.copy()
     test['model'] = predict(model, test, residual)
-    coefs = linear_recalibration(train)
-    test['linear'] = apply_linear(test, coefs)
-    test['provider'] = test.proj_pts.fillna(test.ewma.fillna(0))
-    test['form'] = test.ewma.fillna(test.mean_prev).fillna(test.proj_pts).fillna(0)
+    add_baselines(train, test)
     return model, test
 
 
@@ -212,7 +110,7 @@ print('selected', PARAMS, 'residual' if RESIDUAL else 'direct', ITERS, flush=Tru
 # Shrinkage toward the provider, chosen on the same tuning season (2025 stays untouched).
 if RESIDUAL:
     _, tuned = add_predictions(tune_train, tune_test, PARAMS, RESIDUAL, ITERS)
-    base = base_prediction(tuned)
+    base = lab.base_prediction(tuned)
     correction = tuned['model'].to_numpy() - base
     best_shrink = None
     for lam in [0.0, 0.25, 0.5, 0.75, 1.0]:
@@ -329,8 +227,12 @@ availability = {
     'Questionable': avail_raw.get('Questionable', {}).get('rate', 0.67),
     'Doubtful': avail_raw.get('Doubtful', {}).get('rate', 0.01),
     'Out': 0.0,
-    'n': {k: v['n'] for k, v in avail_raw.items() if ':' not in k},
+    'n': {k: v['n'] for k, v in avail_raw.items() if ':' not in k and isinstance(v, dict) and 'n' in v},
 }
+if 'Questionable:starter' in avail_raw and 'Questionable:reserve' in avail_raw:
+    availability['roles'] = {'Questionable': {'starter': avail_raw['Questionable:starter']['rate'], 'reserve': avail_raw['Questionable:reserve']['rate']}}
+if avail_raw.get('ahead'):
+    availability['ahead'] = avail_raw['ahead']
 
 importance_model = holdout_model
 # Permutation-free importance proxy: split gain summed per feature over the holdout model.
@@ -371,6 +273,7 @@ report = {
     'meta': meta,
     'holdout2025': report_2025,
     'live2026': report_2026,
+    'live2026Weeks': sorted(int(w) for w in live_test.week.unique()) if len(live_test) else [],
     'maeDeltaCI2025': ci,
     'coverage80': coverage,
     'availability': availability,

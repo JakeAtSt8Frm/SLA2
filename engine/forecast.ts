@@ -14,8 +14,10 @@ export interface WeekForecast {
   week: number;
   /** E[points | plays] from the model. */
   mean: number;
-  /** P(plays) from injury designation and roster status. */
+  /** P(plays) from injury designation and roster status (lineup planning: the bench covers later injuries). */
   play: number;
+  /** P(plays) including the chance of getting hurt or benched before that week: what season-long value uses. */
+  rosPlay: number;
   /** play × mean — what lineup decisions optimise. */
   expected: number;
   /** Provider (Sleeper/Rotowire) projection rescored with league settings. */
@@ -51,8 +53,6 @@ export interface ForecastEnv {
 
 const FEATURE_INDEX: Record<string, number> = Object.fromEntries(FEATURE_NAMES.map((n, i) => [n, i]));
 
-const SIDELINED = new Set(['IR', 'PUP', 'NFI', 'Out', 'Sus', 'Suspended', 'DNR', 'NA', 'COV', 'Inactive']);
-
 /**
  * Chance of playing k weeks from now. Sleeper gives no return dates, so these are stated
  * assumptions: IR/PUP ≈ out a month, Out ≈ likely back within two weeks, Questionable recovers.
@@ -70,13 +70,44 @@ export function futurePlayProbability(base: number, status: string | null, weeks
   }
 }
 
+/** Position groups of the weeks-ahead availability curve. */
+export const aheadGroup = (pos: string) => (pos === 'DL' || pos === 'LB' || pos === 'DB' ? 'IDP' : pos);
+
+const SNAP_L4 = FEATURE_NAMES.indexOf('snap_l4');
+const N_L16 = FEATURE_NAMES.indexOf('n_l16');
+/**
+ * A starter (≥50% of snaps over his last four games; kickers with a recent game) listed
+ * Questionable plays far more often than a reserve with the same tag.
+ */
+export function roleOf(pos: string, x: Float64Array): 'starter' | 'reserve' {
+  if (pos === 'K') return x[N_L16] > 0 ? 'starter' : 'reserve';
+  return x[SNAP_L4] >= 0.5 ? 'starter' : 'reserve';
+}
+
 /** Players with no provider projection mid-week are usually inactive or buried on the depth chart. */
 export const NO_PROJECTION_PLAY_FACTOR = 0.35;
 
 export function forecastPlayer(env: ForecastEnv, id: string, week: number): WeekForecast {
+  return withLiveState(env, pregameForecast(env, id, week));
+}
+
+function finish(f: Omit<WeekForecast, 'expected' | 'floor' | 'median' | 'ceiling'>): WeekForecast {
+  const outcome: Outcome = { mean: f.mean, play: f.play, residuals: f.residuals };
+  return {
+    ...f, expected: f.play * f.mean,
+    floor: Math.max(-5, mixtureQuantile(outcome, 0.1)), median: mixtureQuantile(outcome, 0.5), ceiling: mixtureQuantile(outcome, 0.9),
+  };
+}
+
+/**
+ * The forecast as it stands before kickoff. It depends only on the player's history, the week's
+ * projection and game, and his status, so the server can reuse it across rebuilds while live
+ * scores tick (see withLiveState).
+ */
+export function pregameForecast(env: ForecastEnv, id: string, week: number): WeekForecast {
   const p = env.players[id];
   const empty = (extra: Partial<WeekForecast> = {}): WeekForecast => ({
-    id, week, mean: 0, play: 0, expected: 0, provider: null, floor: 0, median: 0, ceiling: 0,
+    id, week, mean: 0, play: 0, rosPlay: 0, expected: 0, provider: null, floor: 0, median: 0, ceiling: 0,
     opponent: null, home: null, kickoff: null, bye: false, residuals: new Array(21).fill(0), live: null, ...extra,
   });
   if (!p) return empty();
@@ -90,46 +121,49 @@ export function forecastPlayer(env: ForecastEnv, id: string, week: number): Week
   const provider = stats ? scoreStatsExact(completeStats(stats, p.pos, true), env.scoring) : null;
   const defense = p.pos === 'DEF';
   // A team defense always takes the field; its forecast is the rescored projection (engine/dst.ts).
-  const mean = defense ? provider ?? env.defense?.fallback ?? 0 : Math.max(0, env.model.predict(env.state.features(id, env.season, week, stats, ctx, team)));
+  const x = defense ? null : env.state.features(id, env.season, week, stats, ctx, team);
+  const mean = x ? Math.max(0, env.model.predict(x)) : provider ?? env.defense?.fallback ?? 0;
 
+  const ahead = week - env.currentWeek;
   const baseNone = env.model.playProbability(null, true);
-  let play: number;
-  if (defense) play = 1;
-  else if (!p.team) play = 0;
-  else if (week === env.currentWeek) play = env.model.playProbability(p.injuryStatus, true);
-  else play = SIDELINED.has(p.injuryStatus ?? '') || p.injuryStatus ? futurePlayProbability(baseNone, p.injuryStatus, week - env.currentWeek) : baseNone;
-  if (!stats && !defense) play *= NO_PROJECTION_PLAY_FACTOR;
-
-  let residuals = defense ? env.defense?.residuals ?? new Array(21).fill(0) : env.model.quantiles(p.pos, mean);
-  let outcomeMean = mean;
-  let live: WeekForecast['live'] = null;
-  if (week === env.currentWeek && env.gameStatus) {
-    const status = env.gameStatus(team, week) ?? ((game.kickoff ?? Infinity) <= env.now ? 'in_game' : 'pre_game');
-    const line = env.liveStats?.get(id);
-    const points = line ? scoreStatsExact(completeStats(line, p.pos), env.scoring) : 0;
-    if (status === 'complete') {
-      live = { status, points };
-      play = 1;
-      outcomeMean = points;
-      residuals = new Array(21).fill(0);
-    } else if (status === 'in_game') {
-      live = { status, points };
-      // No game clock in the feed: estimate what's left from wall-clock time (a broadcast runs ≈185 min).
-      const elapsed = game.kickoff ? (env.now - game.kickoff) / 60_000 : 90;
-      const remaining = Math.min(1, Math.max(0.03, 1 - elapsed / 185));
-      const playing = line ? 1 : play;
-      play = 1;
-      outcomeMean = points + mean * remaining * playing;
-      residuals = residuals.map(r => r * Math.sqrt(remaining) * playing);
-    } else live = { status: 'pre_game', points: 0 };
+  let play: number, rosPlay: number;
+  if (defense) play = rosPlay = 1;
+  else if (!p.team) play = rosPlay = 0;
+  else if (ahead <= 0) play = rosPlay = env.model.playProbability(p.injuryStatus, true, x ? roleOf(p.pos, x) : undefined);
+  else {
+    play = p.injuryStatus ? futurePlayProbability(baseNone, p.injuryStatus, ahead) : baseNone;
+    const healthy = env.model.healthyAhead(aheadGroup(p.pos), ahead);
+    rosPlay = p.injuryStatus ? futurePlayProbability(healthy, p.injuryStatus, ahead) : healthy;
   }
+  if (!stats && !defense) { play *= NO_PROJECTION_PLAY_FACTOR; rosPlay *= NO_PROJECTION_PLAY_FACTOR; }
 
-  const outcome: Outcome = { mean: outcomeMean, play, residuals };
-  return {
-    id, week, mean: outcomeMean, play, expected: play * outcomeMean, provider,
-    floor: Math.max(-5, mixtureQuantile(outcome, 0.1)), median: mixtureQuantile(outcome, 0.5), ceiling: mixtureQuantile(outcome, 0.9),
-    opponent: ctx.opponent, home: ctx.home, kickoff: game.kickoff, bye: false, residuals, live,
-  };
+  const residuals = defense ? env.defense?.residuals ?? new Array(21).fill(0) : env.model.quantiles(p.pos, mean);
+  return finish({ id, week, mean, play, rosPlay, provider, opponent: ctx.opponent, home: ctx.home, kickoff: game.kickoff, bye: false, residuals, live: null });
+}
+
+/**
+ * The current week's live overlay: a finished game is what happened; a game in progress is
+ * points so far plus the forecast for the time that's left.
+ */
+export function withLiveState(env: ForecastEnv, f: WeekForecast): WeekForecast {
+  if (f.week !== env.currentWeek || !env.gameStatus || f.bye) return f;
+  const p = env.players[f.id];
+  const team = p ? env.projections(f.week)?.get(f.id)?.team ?? p.team : null;
+  const game = team ? env.gameFor(team, f.week) : undefined;
+  if (!p || !team || !game) return f;
+  const status = env.gameStatus(team, f.week) ?? ((game.kickoff ?? Infinity) <= env.now ? 'in_game' : 'pre_game');
+  if (status === 'pre_game') return { ...f, live: { status, points: 0 } };
+  const line = env.liveStats?.get(f.id);
+  const points = line ? scoreStatsExact(completeStats(line, p.pos), env.scoring) : 0;
+  if (status === 'complete') return finish({ ...f, play: 1, rosPlay: 1, mean: points, residuals: new Array(21).fill(0), live: { status, points } });
+  // No game clock in the feed: estimate what's left from wall-clock time (a broadcast runs ≈185 min).
+  const elapsed = game.kickoff ? (env.now - game.kickoff) / 60_000 : 90;
+  const remaining = Math.min(1, Math.max(0.03, 1 - elapsed / 185));
+  const playing = line ? 1 : f.play;
+  return finish({
+    ...f, play: 1, rosPlay: 1, mean: points + f.mean * remaining * playing,
+    residuals: f.residuals.map(r => r * Math.sqrt(remaining) * playing), live: { status, points },
+  });
 }
 
 export const outcomeOf = (f: WeekForecast): Outcome => ({ mean: f.mean, play: f.play, residuals: f.residuals });

@@ -48,6 +48,8 @@ interface Log {
   proj: number | null;
 }
 
+interface HistoryPart { season: number; count: number; logs: readonly Log[]; x: Float64Array; lastAbs: number | null; bigRate: number; tklRate: number }
+
 interface TeamSeason { offSnaps: number; defSnaps: number; games: number; weeks: Set<number>; allowed: Map<Pos, number> }
 
 const TACKLE_KEYS = ['idp_tkl_solo', 'idp_tkl_ast'];
@@ -74,6 +76,8 @@ export class FeatureState {
   private split: WeightSplit;
   private scoring: readonly [string, number][];
   private meta: (id: string) => PlayerMeta | undefined;
+  /** History half of each player's feature vector, shared by every week forecast from the same games. */
+  private historyMemo = new Map<string, HistoryPart>();
 
   constructor(scoring: readonly [string, number][], meta: (id: string) => PlayerMeta | undefined) {
     this.scoring = scoring;
@@ -83,6 +87,7 @@ export class FeatureState {
 
   /** Forget anything older than the previous season (live serving only ever has that much). */
   startSeason(season: number) {
+    this.historyMemo.clear();
     for (const [id, logs] of this.logs) {
       const kept = logs.filter(l => l.season >= season - 1);
       if (kept.length) this.logs.set(id, kept); else this.logs.delete(id);
@@ -96,6 +101,7 @@ export class FeatureState {
    * how much each player tends to beat or miss them.
    */
   ingestWeek(season: number, week: number, lines: readonly IngestLine[], projections?: ReadonlyMap<string, Stats>) {
+    this.historyMemo.clear();
     const abs = absWeek(season, week);
     // Team volume from any player's team-snap counters.
     const teamSnaps = new Map<string, { off: number; def: number; opp: string | null }>();
@@ -238,11 +244,13 @@ export class FeatureState {
    * projection (may be undefined); `ctx` is the NFL game context (undefined on bye).
    */
   features(id: string, season: number, week: number, projection: Stats | undefined, ctx: GameContext | undefined, team: string | null): Float64Array {
-    const x = new Float64Array(FEATURE_COUNT).fill(Number.NaN);
     const m = this.meta(id);
-    if (!m) return x;
+    if (!m) return new Float64Array(FEATURE_COUNT).fill(Number.NaN);
     const pos = m.pos;
     const idp = IDP.has(pos);
+    const target = absWeek(season, week);
+    const history = this.historyPart(id, season, target, pos);
+    const x = history.x.slice();
 
     // Provider projection, rescored with this league's settings.
     if (projection && hasForecast(projection)) {
@@ -258,9 +266,60 @@ export class FeatureState {
       x[F.proj_tkl] = (p.idp_tkl_solo ?? 0) + (p.idp_tkl_ast ?? 0);
     } else x[F.has_proj] = 0;
 
+    if (history.lastAbs !== null) {
+      x[F.weeks_since] = Math.min(30, target - history.lastAbs);
+      if (idp) {
+        const expSnaps = x[F.snaps_l4];
+        const oppPlays = ctx ? this.playsRatio(season, ctx.opponent, 'off') : 1;
+        x[F.exp_big_pts] = history.bigRate * expSnaps * oppPlays;
+        x[F.exp_tkl_pts] = history.tklRate * expSnaps * oppPlays;
+      }
+    }
+
+    if (!Number.isNaN(x[F.proj_pts]) && !Number.isNaN(x[F.mean_l16])) x[F.proj_vs_form] = x[F.proj_pts] - x[F.mean_l16];
+    // How far recent production sits above/below the provider — where the provider is most wrong.
+    x[F.gap_ewma] = x[F.ewma] - x[F.proj_pts];
+    x[F.gap_l16] = x[F.mean_l16] - x[F.proj_pts];
+    x[F.gap_big] = x[F.big_pts_l16] - x[F.proj_big_pts];
+
+    if (ctx) {
+      x[F.opp_ratio] = this.oppRatio(season, ctx.opponent, pos);
+      x[F.opp_plays_ratio] = this.playsRatio(season, ctx.opponent, 'off');
+      if (team) x[F.team_plays_ratio] = this.playsRatio(season, team, idp ? 'def' : 'off');
+      if (ctx.impliedTotal !== null) x[F.implied] = ctx.impliedTotal;
+      if (ctx.opponentImplied !== null) x[F.opp_implied] = ctx.opponentImplied;
+      if (ctx.spread !== null) x[F.spread] = ctx.spread;
+      if (ctx.total !== null) x[F.total] = ctx.total;
+      x[F.home] = ctx.home ? 1 : 0;
+      x[F.dome] = ctx.dome ? 1 : 0;
+      if (ctx.rest !== null) x[F.rest] = ctx.rest;
+    }
+
+    if (m.birthDate) {
+      const born = Date.parse(m.birthDate);
+      if (Number.isFinite(born)) x[F.age] = (Date.UTC(season, 8, 1) - born) / (365.25 * 86400000);
+    }
+    if (m.yearsExp !== null) x[F.exp] = m.yearsExp;
+    x[F.wk] = week;
+    const flags: [FeatureName, Pos][] = [['is_qb', 'QB'], ['is_rb', 'RB'], ['is_wr', 'WR'], ['is_te', 'TE'], ['is_k', 'K'], ['is_dl', 'DL'], ['is_lb', 'LB'], ['is_db', 'DB']];
+    for (const [name, p] of flags) x[F[name]] = pos === p ? 1 : 0;
+    return x;
+  }
+
+  /**
+   * Features built from the games played before `target`. Logs are in week order, so every week
+   * after the latest game sees the same history; the result is kept until the next ingest.
+   */
+  private historyPart(id: string, season: number, target: number, pos: Pos): HistoryPart {
     const logs = this.logs.get(id) ?? [];
-    const target = absWeek(season, week);
-    const past = logs.filter(l => l.abs < target);
+    let count = logs.length;
+    while (count > 0 && logs[count - 1].abs >= target) count--;
+    const cached = this.historyMemo.get(id);
+    if (cached && cached.season === season && cached.count === count && cached.logs === logs) return cached;
+
+    const x = new Float64Array(FEATURE_COUNT).fill(Number.NaN);
+    const part: HistoryPart = { season, count, logs, x, lastAbs: null, bigRate: Number.NaN, tklRate: Number.NaN };
+    const past = logs.slice(0, count);
     const cur = past.filter(l => l.season === season);
     const prev = past.filter(l => l.season === season - 1);
     const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : Number.NaN);
@@ -296,56 +355,25 @@ export class FeatureState {
       x[F.tkl_l4] = mean(l4.map(l => l.tkl));
       x[F.big_pts_l16] = mean(l16.map(l => l.bigPts));
       x[F.fga_l8] = mean(l8.map(l => l.fga));
-      x[F.weeks_since] = Math.min(30, target - past[past.length - 1].abs);
+      part.lastAbs = past[past.length - 1].abs;
       // Player-specific tendency to beat or miss the provider, shrunk hard toward zero.
       const withProj = past.filter(l => l.proj !== null).slice(-10);
       x[F.proj_resid_n] = withProj.length;
       x[F.proj_resid] = withProj.reduce((a, l) => a + (l.pts - (l.proj ?? 0)), 0) / (withProj.length + 6);
       const prevShares = past.slice(-8, -4).map(l => l.snapShare).filter((v): v is number => v !== null);
       if (prevShares.length && !Number.isNaN(x[F.snap_l4])) x[F.snap_trend] = x[F.snap_l4] - mean(prevShares);
-      if (idp) {
+      if (IDP.has(pos)) {
         // Per-snap rates shrunk toward the position (big plays are rare and noisy).
         const prior = this.posRates(season, pos);
         const snaps = l16.reduce((a, l) => a + l.snaps, 0);
-        const bigRate = (l16.reduce((a, l) => a + l.bigPts, 0) + 250 * prior.big) / (snaps + 250);
-        const tklRate = (l16.reduce((a, l) => a + l.tklPts, 0) + 120 * prior.tkl) / (snaps + 120);
-        x[F.big_rate] = bigRate;
-        x[F.tkl_rate] = tklRate;
-        const expSnaps = x[F.snaps_l4];
-        const oppPlays = ctx ? this.playsRatio(season, ctx.opponent, 'off') : 1;
-        x[F.exp_big_pts] = bigRate * expSnaps * oppPlays;
-        x[F.exp_tkl_pts] = tklRate * expSnaps * oppPlays;
+        part.bigRate = (l16.reduce((a, l) => a + l.bigPts, 0) + 250 * prior.big) / (snaps + 250);
+        part.tklRate = (l16.reduce((a, l) => a + l.tklPts, 0) + 120 * prior.tkl) / (snaps + 120);
+        x[F.big_rate] = part.bigRate;
+        x[F.tkl_rate] = part.tklRate;
       }
     }
-
-    if (!Number.isNaN(x[F.proj_pts]) && !Number.isNaN(x[F.mean_l16])) x[F.proj_vs_form] = x[F.proj_pts] - x[F.mean_l16];
-    // How far recent production sits above/below the provider — where the provider is most wrong.
-    x[F.gap_ewma] = x[F.ewma] - x[F.proj_pts];
-    x[F.gap_l16] = x[F.mean_l16] - x[F.proj_pts];
-    x[F.gap_big] = x[F.big_pts_l16] - x[F.proj_big_pts];
-
-    if (ctx) {
-      x[F.opp_ratio] = this.oppRatio(season, ctx.opponent, pos);
-      x[F.opp_plays_ratio] = this.playsRatio(season, ctx.opponent, 'off');
-      if (team) x[F.team_plays_ratio] = this.playsRatio(season, team, idp ? 'def' : 'off');
-      if (ctx.impliedTotal !== null) x[F.implied] = ctx.impliedTotal;
-      if (ctx.opponentImplied !== null) x[F.opp_implied] = ctx.opponentImplied;
-      if (ctx.spread !== null) x[F.spread] = ctx.spread;
-      if (ctx.total !== null) x[F.total] = ctx.total;
-      x[F.home] = ctx.home ? 1 : 0;
-      x[F.dome] = ctx.dome ? 1 : 0;
-      if (ctx.rest !== null) x[F.rest] = ctx.rest;
-    }
-
-    if (m.birthDate) {
-      const born = Date.parse(m.birthDate);
-      if (Number.isFinite(born)) x[F.age] = (Date.UTC(season, 8, 1) - born) / (365.25 * 86400000);
-    }
-    if (m.yearsExp !== null) x[F.exp] = m.yearsExp;
-    x[F.wk] = week;
-    const flags: [FeatureName, Pos][] = [['is_qb', 'QB'], ['is_rb', 'RB'], ['is_wr', 'WR'], ['is_te', 'TE'], ['is_k', 'K'], ['is_dl', 'DL'], ['is_lb', 'LB'], ['is_db', 'DB']];
-    for (const [name, p] of flags) x[F[name]] = pos === p ? 1 : 0;
-    return x;
+    this.historyMemo.set(id, part);
+    return part;
   }
 }
 

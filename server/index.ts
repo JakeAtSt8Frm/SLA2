@@ -7,6 +7,7 @@ import path from 'node:path';
 import { getCore } from './league.ts';
 import { configuredEspnLeagues, validEspnId } from './espn.ts';
 import { findLeagues } from './sleeper.ts';
+import { sendJson } from './http.ts';
 import { recordSnapshot, trackRecord } from './snapshots.ts';
 import * as views from './views.ts';
 import { HttpError } from './views.ts';
@@ -28,10 +29,7 @@ const rosterId = (c: Context) => {
   if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Invalid team.');
   return n;
 };
-const json = (c: Context, data: unknown, maxAge = 30) => {
-  c.header('Cache-Control', `private, max-age=${maxAge}`);
-  return c.json(data as object);
-};
+const json = (c: Context, data: object, maxAge = 30) => sendJson(c, data, maxAge);
 
 app.get('/api/health', c => c.json({ ok: true, service: 'sla2', time: new Date().toISOString() }));
 app.get('/api/model', c => json(c, views.model(), 300));

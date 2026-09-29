@@ -89,7 +89,7 @@ describe('lineup optimizer', () => {
 });
 
 function forecast(id: string, expected: number): WeekForecast {
-  return { id, week: 3, mean: expected, play: 1, expected, provider: expected, floor: 0, median: expected, ceiling: expected, opponent: 'X', home: true, kickoff: 0, bye: false, residuals: new Array(21).fill(0), live: null };
+  return { id, week: 3, mean: expected, play: 1, rosPlay: 1, expected, provider: expected, floor: 0, median: expected, ceiling: expected, opponent: 'X', home: true, kickoff: 0, bye: false, residuals: new Array(21).fill(0), live: null };
 }
 const info = (id: string, p: Pos): PlayerInfo => ({ id, name: id, pos: p, eligible: [p], team: 'X', age: 25, birthDate: null, yearsExp: 3, injuryStatus: null, injuryBodyPart: null, injuryNotes: null, status: 'Active', depthOrder: 1, searchRank: 100, number: 1, college: null, newsUpdated: null });
 
@@ -172,6 +172,28 @@ describe('features', () => {
     const x4 = fs.features('p', 2025, 4, undefined, undefined, 'X');
     expect(x4[idx('n_cur')]).toBe(3);
   });
+
+  it('reuse history across weeks without changing a value, and refresh it after an ingest', () => {
+    const meta = () => ({ pos: 'LB' as Pos, birthDate: '1999-05-01', yearsExp: 4 });
+    const scoring = compileScoring({ idp_tkl_solo: 2, idp_sack: 9 });
+    const line = (w: number) => ({ id: 'p', team: 'X', opponent: w % 2 ? 'Y' : 'Z', stats: { gp: 1, def_snp: 60, tm_def_snp: 65, idp_tkl_solo: w + 3, idp_sack: w % 2 } });
+    const build = () => {
+      const fs = new FeatureState(scoring, meta);
+      fs.startSeason(2025);
+      for (let w = 1; w <= 5; w++) fs.ingestWeek(2025, w, [line(w)]);
+      return fs;
+    };
+    const warm = build();
+    for (let w = 6; w <= 9; w++) warm.features('p', 2025, w, undefined, undefined, 'X');
+    const ctx = { opponent: 'Y', home: true, kickoff: null, impliedTotal: 21, opponentImplied: 24, spread: -3, total: 45, rest: 7, dome: false };
+    for (let w = 6; w <= 9; w++) {
+      // A warmed state (history reused) and a fresh one must agree exactly, NaN for NaN.
+      expect(Array.from(warm.features('p', 2025, w, { gp: 1, idp_tkl_solo: 6 }, ctx, 'X'))).toEqual(Array.from(build().features('p', 2025, w, { gp: 1, idp_tkl_solo: 6 }, ctx, 'X')));
+    }
+    warm.ingestWeek(2025, 6, [line(6)]);
+    const idx = (name: string) => FEATURE_NAMES.indexOf(name as (typeof FEATURE_NAMES)[number]);
+    expect(warm.features('p', 2025, 7, undefined, undefined, 'X')[idx('n_cur')]).toBe(6);
+  });
 });
 
 describe('trained model', () => {
@@ -193,6 +215,19 @@ describe('trained model', () => {
     expect(model.playProbability('Questionable', true)).toBeLessThan(0.8);
     expect(model.playProbability('Out', true)).toBe(0);
     expect(model.playProbability('IR', true)).toBe(0);
+  });
+  it('gives Questionable starters better odds than reserves when the model measured both', () => {
+    if (!file.availability.roles?.Questionable) return;
+    expect(model.playProbability('Questionable', true, 'starter')).toBeGreaterThan(model.playProbability('Questionable', true, 'reserve'));
+  });
+  it('lets availability decay with the horizon for season-long value, and falls back without a curve', () => {
+    for (const group of Object.keys(file.availability.ahead ?? {})) {
+      expect(model.healthyAhead(group, 1)).toBeLessThan(model.playProbability(null, true));
+      expect(model.healthyAhead(group, 8)).toBeLessThanOrEqual(model.healthyAhead(group, 1));
+      expect(model.healthyAhead(group, 40)).toBeGreaterThan(0.4);
+    }
+    const legacy = new ProjectionModel({ ...file, availability: { ...file.availability, ahead: undefined } });
+    expect(legacy.healthyAhead('RB', 5)).toBe(legacy.playProbability(null, true));
   });
 });
 

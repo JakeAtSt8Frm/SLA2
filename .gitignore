@@ -3,11 +3,9 @@ dist
 .cache
 research/.venv
 research/cache
-research/dataset*.csv
+research/*.csv
 research/__pycache__
+research/review*.json
 data/snapshots
 .DS_Store
-research/predictions_2025*.csv
-research/backtest_2025*.csv
-research/parity_fixture*.csv
 sla/
