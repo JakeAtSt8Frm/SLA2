@@ -560,8 +560,28 @@ function powerPage(core: LeagueCore) {
     history.push({ week: w, ranks: rows.map(r => ({ rosterId: r.rosterId, score: r1(r.score), rank: r.rank })) });
   }
   const upcoming = core.horizon.filter(w => w <= core.lastRegularWeek).slice(0, 6);
+  // Season power: points already scored plus every remaining regular-season week, projected the way
+  // the playoff simulation projects it (best lineup scaled by how the manager sets lineups).
+  const remaining = core.horizon.filter(w => w <= core.lastRegularWeek);
+  const seasonRows = core.teams.map(t => {
+    const scored = core.summaries.get(t.rosterId)!.pointsFor;
+    const projected = remaining.reduce((a, w) => a + teamDist(core, t.rosterId, w).mean, 0);
+    return { rosterId: t.rosterId, scored, projected, total: scored + projected };
+  });
+  const scoredRank = new Map([...seasonRows].sort((a, b) => b.scored - a.scored).map((r, i) => [r.rosterId, i + 1]));
+  const seasonWeeks = core.results.length + remaining.length;
   return {
     week: core.week,
+    season: {
+      playedWeeks: core.results.length,
+      remainingWeeks: remaining.length,
+      firstRemaining: remaining[0] ?? null,
+      lastRegularWeek: core.lastRegularWeek,
+      rankings: seasonRows.sort((a, b) => b.total - a.total).map((r, i) => ({
+        rosterId: r.rosterId, rank: i + 1, scoredRank: scoredRank.get(r.rosterId)!,
+        scored: r1(r.scored), projected: r1(r.projected), total: r1(r.total), ppg: r1(seasonWeeks ? r.total / seasonWeeks : 0),
+      })),
+    },
     rankings: pw.map(p => {
       const t = core.teams.find(x => x.rosterId === p.rosterId)!;
       const s = core.summaries.get(p.rosterId)!;

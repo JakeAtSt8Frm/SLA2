@@ -26,7 +26,7 @@ async function smoke(league: string): Promise<number> {
     [`/api/leagues/${league}/defense`, has('groups', 'seasons')],
     [`/api/leagues/${league}/bootstrap`, has('league', 'teams', 'model')],
     [`/api/leagues/${league}/overview`, has('standings', 'matchups', 'awards')],
-    [`/api/leagues/${league}/power`, has('rankings', 'history')],
+    [`/api/leagues/${league}/power`, has('rankings', 'season', 'history')],
     [`/api/leagues/${league}/playoffs`, b => (Array.isArray(b.teams) && b.teams.length ? null : 'teams')],
     [`/api/leagues/${league}/matchups`, has('games', 'week')],
     [`/api/leagues/${league}/matchups?week=1`, has('games')],

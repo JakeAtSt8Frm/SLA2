@@ -48,7 +48,7 @@ npm run verify:espn      # rescoring ESPN leagues from stat lines vs ESPN’s of
 | **Start / sit** | Best legal lineup across every slot (Hungarian assignment, kickoff locks respected), swap-by-swap confidence, win odds as set vs optimized |
 | **Waiver wire** | Every free agent tested in *your* roster: rest-of-season points added to your best lineup, net of the best drop (dynasty-aware in dynasty leagues), FAAB guidance or waiver priority, rival demand |
 | **Matchups** | 8,000-run player-level simulations, score distributions, side-by-side lineups, live scoring, past weeks |
-| **Power rankings** | Composite of scoring, all-play, recent form and projected outlook, with trend and roster value |
+| **Power rankings** | Composite of scoring, all-play, recent form and projected outlook, with trend and roster value; season power ranks points scored plus the projection for every remaining regular-season week |
 | **Playoff odds** | 12,000 simulated seasons: playoff/bye/title odds, finish distribution, this-week leverage, every remaining game |
 | **Roster & outlook** | Any team: positional strength vs league, schedule win odds, roster values, weekly scoring |
 | **Trade lab** | Re-optimizes both rosters every remaining week, re-simulates playoff odds, compares now vs dynasty value |
