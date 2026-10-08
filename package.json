@@ -23,6 +23,7 @@
     "research": "npm run research:fetch && npm run research:dataset && npm run research:train && npm run research:backtest && npm run research:review",
     "research:espn": "for id in espn-390483100 espn-1159035309; do node research/build-dataset.ts $id && research/.venv/bin/python research/train.py $id && node research/backtest.ts $id || exit 1; done",
     "smoke": "node scripts/smoke.ts",
+    "bench": "node scripts/bench.ts",
     "verify:scoring": "node research/verify-scoring.ts",
     "verify:espn": "node research/verify-espn.ts",
     "check": "npm run typecheck && npm test"

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ArrowLeftRight, Scale, X } from 'lucide-react';
-import { usePlayers, useTrade, type PlayerRow, type Trade } from '../lib/api.ts';
+import { usePlayers, useTrade, type ListRow, type Trade } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { fmt, posLabel, prob, signed, teamColor } from '../lib/format.ts';
 import { Button, Card, CardHeader, Delta, Empty, ErrorState, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Select, TeamAvatar, cx } from '../components/ui.tsx';
@@ -14,7 +14,7 @@ export default function TradePage() {
   const [aGives, setAGives] = useState<string[]>([]);
   const [bGives, setBGives] = useState<string[]>([]);
   const byOwner = useMemo(() => {
-    const m = new Map<number, PlayerRow[]>();
+    const m = new Map<number, ListRow[]>();
     for (const p of players.data?.players ?? []) if (p.owner !== null) m.set(p.owner, [...(m.get(p.owner) ?? []), p]);
     return m;
   }, [players.data]);
@@ -50,7 +50,7 @@ export default function TradePage() {
   );
 }
 
-function RosterPicker({ rosterId, onTeam, exclude, players, selected, onPick }: { rosterId: number; onTeam: (v: number) => void; exclude: number; players: PlayerRow[]; selected: string[]; onPick: (id: string) => void }) {
+function RosterPicker({ rosterId, onTeam, exclude, players, selected, onPick }: { rosterId: number; onTeam: (v: number) => void; exclude: number; players: ListRow[]; selected: string[]; onPick: (id: string) => void }) {
   const { boot } = useApp();
   const [pos, setPos] = useState('ALL');
   const list = players.filter(p => pos === 'ALL' || p.pos === pos).sort((x, y) => (y.value?.value ?? 0) - (x.value?.value ?? 0));

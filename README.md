@@ -36,6 +36,7 @@ Checks:
 ```bash
 npm run check        # typecheck + unit tests (scoring parity, optimizer vs brute force, sims, model runtime)
 npm run smoke        # hits every API endpoint of a running server, for every configured league
+npm run bench        # cold league build, then first-request time and size of every view
 npm run verify:scoring   # replays every week of league history against Sleeper’s official scores
 npm run verify:espn      # rescoring ESPN leagues from stat lines vs ESPN’s official box scores
 ```
@@ -136,7 +137,9 @@ track record appears in the Model lab as the season goes on.
 engine/     Pure TypeScript domain logic shared by server and research
             scoring · features · model runtime · forecasts · optimizer · lineups · simulations
             · values · waivers · trades · power · recap
-server/     Hono API: Sleeper/nflverse clients with memory+disk caching and stale-while-revalidate,
+server/     Hono API: Sleeper/nflverse clients with memory+disk caching, stale-while-revalidate and
+            conditional requests (stored ETags: an unchanged feed costs an empty 304, not a 6 MB
+            download and parse; a core built from stale copies is rebuilt as soon as fresh ones land),
             league "core" (every forecast for every remaining week, re-checked every 90 s while games
             are on; rebuilds are incremental: feature history and each player's pregame forecast are
             reused unless their inputs changed, so a live scoring update costs ~40 ms instead of ~1 s),

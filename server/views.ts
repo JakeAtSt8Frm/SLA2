@@ -115,6 +115,26 @@ function playerRow(core: LeagueCore, id: string) {
   };
 }
 
+/**
+ * Compact row for the long player tables (Players, waiver wire, trade pickers): only what a cell
+ * shows, about a third the size of playerRow. The drawer loads the full forecast per player.
+ */
+function listRow(core: LeagueCore, id: string) {
+  const p = core.players[id];
+  const f = core.week !== null ? core.forecasts.get(core.week)?.get(id) : undefined;
+  const v = core.values.get(id);
+  const s = seasonLines(core).get(id);
+  return {
+    id, name: p.name, pos: p.pos, eligible: p.eligible, team: p.team, age: p.age === null ? null : Math.floor(p.age),
+    injury: p.injuryStatus, owner: core.ownerOf.get(id) ?? null,
+    week: f ? { exp: r2(f.expected), provider: f.provider === null ? null : r2(f.provider), bye: f.bye } : null,
+    value: v ? { value: r1(v.value), dynasty: r1(v.dynasty), vorp: r2(v.vorp), rosAvg: r2(v.rosAvg) } : null,
+    season: s ? { ppg: r2(s.ppg), last3: r2(s.last3), snap: s.snap === null ? null : pct(s.snap), weeks: s.weeks.map(x => [x.week, r1(x.pts)]) } : null,
+    ranks: { total: s?.totalRank ?? null, ppg: s?.ppgRank ?? null },
+    trending: core.trending.get(id) ?? 0,
+  };
+}
+
 function teamView(core: LeagueCore, rosterId: number) {
   const t = core.teams.find(x => x.rosterId === rosterId)!;
   const s = core.summaries.get(rosterId);
@@ -494,7 +514,7 @@ export async function waivers(id: string, rosterId: number) {
     });
     // Everyone available who could plausibly matter: forecast to score, or has scored this season.
     const gainOf = new Map(recs.map(r => [r.id, r]));
-    const fa = freeAgents.map(pid => ({ ...playerRow(core, pid), gain: gainOf.has(pid) ? r1(gainOf.get(pid)!.netGain) : null }))
+    const fa = freeAgents.map(pid => ({ ...listRow(core, pid), gain: gainOf.has(pid) ? r1(gainOf.get(pid)!.netGain) : null }))
       .filter(r => (r.week?.exp ?? 0) > 0.3 || (r.value?.rosAvg ?? 0) > 0.5 || (r.season?.ppg ?? 0) > 2)
       .sort((a, b) => (b.value?.rosAvg ?? 0) - (a.value?.rosAvg ?? 0));
     return {
@@ -606,8 +626,8 @@ export async function players(id: string) {
   const core = await getCore(id);
   return once(core, 'players', () => ({
     week: core.week,
-    players: core.relevant.map(pid => playerRow(core, pid))
-      .filter(r => r.owner !== null || (r.value?.rosAvg ?? 0) > 0.5 || (r.season?.gp ?? 0) > 0)
+    players: core.relevant.map(pid => listRow(core, pid))
+      .filter(r => r.owner !== null || (r.value?.rosAvg ?? 0) > 0.5 || r.season !== null)
       .sort((a, b) => (b.value?.value ?? 0) - (a.value?.value ?? 0)),
   }));
 }

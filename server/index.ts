@@ -29,7 +29,7 @@ const rosterId = (c: Context) => {
   if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Invalid team.');
   return n;
 };
-const json = (c: Context, data: object, maxAge = 30) => sendJson(c, data, maxAge);
+const json = (c: Context, data: object, maxAge = 0) => sendJson(c, data, maxAge);
 
 app.get('/api/health', c => c.json({ ok: true, service: 'sla2', time: new Date().toISOString() }));
 app.get('/api/model', c => json(c, views.model(), 300));
@@ -51,9 +51,9 @@ app.get('/api/leagues/:id/matchups', async c => {
   return json(c, await views.matchups(leagueId(c), w));
 });
 app.get('/api/leagues/:id/teams/:rid', async c => json(c, await views.team(leagueId(c), rosterId(c))));
-app.get('/api/leagues/:id/teams/:rid/lineup', async c => json(c, await views.lineup(leagueId(c), rosterId(c)), 15));
+app.get('/api/leagues/:id/teams/:rid/lineup', async c => json(c, await views.lineup(leagueId(c), rosterId(c))));
 app.get('/api/leagues/:id/teams/:rid/waivers', async c => json(c, await views.waivers(leagueId(c), rosterId(c))));
-app.get('/api/leagues/:id/players', async c => json(c, await views.players(leagueId(c)), 60));
+app.get('/api/leagues/:id/players', async c => json(c, await views.players(leagueId(c))));
 app.get('/api/leagues/:id/players/:pid', async c => {
   const pid = c.req.param('pid');
   if (!/^[A-Za-z0-9_:]{1,20}$/.test(pid)) throw new HttpError(400, 'Invalid player.');
@@ -63,16 +63,16 @@ app.post('/api/leagues/:id/trade', async c => {
   const body = await c.req.json().catch(() => null);
   if (!body || typeof body !== 'object') throw new HttpError(400, 'Invalid trade.');
   const b = body as Record<string, unknown>;
-  return json(c, await views.trade(leagueId(c), { a: Number(b.a), b: Number(b.b), aGives: (b.aGives ?? []) as string[], bGives: (b.bGives ?? []) as string[] }), 0);
+  return json(c, await views.trade(leagueId(c), { a: Number(b.a), b: Number(b.b), aGives: (b.aGives ?? []) as string[], bGives: (b.bGives ?? []) as string[] }));
 });
-app.get('/api/leagues/:id/history', async c => json(c, await views.history(leagueId(c)), 300));
-app.get('/api/leagues/:id/recap', async c => json(c, await views.recap(leagueId(c)), 60));
+app.get('/api/leagues/:id/history', async c => json(c, await views.history(leagueId(c))));
+app.get('/api/leagues/:id/recap', async c => json(c, await views.recap(leagueId(c))));
 app.get('/api/leagues/:id/defense', async c => {
   const season = c.req.query('season');
-  return json(c, await views.defense(leagueId(c), season ? Number(season) : undefined), 120);
+  return json(c, await views.defense(leagueId(c), season ? Number(season) : undefined));
 });
-app.get('/api/leagues/:id/transactions', async c => json(c, await views.transactions(leagueId(c)), 60));
-app.get('/api/leagues/:id/tracking', async c => json(c, await trackRecord(await getCore(leagueId(c))), 300));
+app.get('/api/leagues/:id/transactions', async c => json(c, await views.transactions(leagueId(c))));
+app.get('/api/leagues/:id/tracking', async c => json(c, await trackRecord(await getCore(leagueId(c)))));
 app.get('/api/users/:username/leagues', async c => {
   const username = c.req.param('username');
   if (!/^[A-Za-z0-9_.-]{2,40}$/.test(username)) throw new HttpError(400, 'Enter a Sleeper username.');

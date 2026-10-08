@@ -1,4 +1,4 @@
-import { cached, FOREVER, HOUR, MINUTE } from './cache.ts';
+import { cached, FOREVER, HOUR, MINUTE, NOT_MODIFIED, type Revalidation } from './cache.ts';
 import { normalizePosition, normalizeTeam } from '../engine/positions.ts';
 import type { NflGame, PlayerInfo, Pos, Stats } from '../engine/types.ts';
 import type { ScoringSettings } from '../engine/scoring.ts';
@@ -21,14 +21,31 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function fetchText(url: string): Promise<string> {
+/**
+ * Prefixed to every stored ETag. Bump it when a parser's output changes, so cached copies are
+ * downloaded again instead of being revalidated (a 304 would keep the old parse).
+ */
+const PARSER_VERSION = 'p2:';
+
+/**
+ * GET with retries. Given a Revalidation, it is conditional on the cached copy's ETag (Sleeper and
+ * GitHub both answer an unchanged resource with an empty 304), and records the new ETag.
+ */
+async function fetchText(url: string, rv?: Revalidation): Promise<string | typeof NOT_MODIFIED> {
+  const etag = rv?.etag?.startsWith(PARSER_VERSION) ? rv.etag.slice(PARSER_VERSION.length) : null;
+  const headers: Record<string, string> = { Accept: 'application/json, text/csv' };
+  if (etag) headers['If-None-Match'] = etag;
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const response = await withSlot(() => fetch(url, { signal: AbortSignal.timeout(60_000), headers: { Accept: 'application/json, text/csv' } }));
+      const response = await withSlot(() => fetch(url, { signal: AbortSignal.timeout(60_000), headers }));
+      if (response.status === 304 && etag) return NOT_MODIFIED;
       if (response.status === 404) throw Object.assign(new Error(`404 ${url}`), { permanent: true, status: 404 });
       if (!response.ok) throw new Error(`${response.status} ${url}`);
-      return await response.text();
+      const text = await response.text();
+      const next = response.headers.get('etag');
+      if (rv) rv.next = next ? PARSER_VERSION + next : null;
+      return text;
     } catch (error) {
       lastError = error;
       if ((error as { permanent?: boolean }).permanent) break;
@@ -39,11 +56,14 @@ async function fetchText(url: string): Promise<string> {
 }
 
 /** Sleeper's undocumented stats/projection routes live on both hosts; try each. */
-async function sleeperJson(route: string): Promise<unknown> {
+async function sleeperJson(route: string): Promise<unknown>;
+async function sleeperJson(route: string, rv: Revalidation): Promise<unknown | typeof NOT_MODIFIED>;
+async function sleeperJson(route: string, rv?: Revalidation): Promise<unknown> {
   let lastError: unknown;
   for (const host of HOSTS) {
     try {
-      const text = await fetchText(`${host}${route}`);
+      const text = await fetchText(`${host}${route}`, rv);
+      if (text === NOT_MODIFIED) return text;
       return text === '' || text === 'null' ? null : JSON.parse(text);
     } catch (error) {
       lastError = error;
@@ -51,6 +71,12 @@ async function sleeperJson(route: string): Promise<unknown> {
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
+
+/** Loader for a cached Sleeper route: revalidates the cached copy and parses only a changed response. */
+const route = <T>(path: string, parse: (raw: unknown) => T) => async (rv: Revalidation): Promise<T | typeof NOT_MODIFIED> => {
+  const raw = await sleeperJson(path, rv);
+  return raw === NOT_MODIFIED ? NOT_MODIFIED : parse(raw);
+};
 
 // ─── Parsing helpers ─────────────────────────────────────────────────────────
 
@@ -283,19 +309,19 @@ export const sleeper = {
     const raw = obj(await sleeperJson('/v1/state/nfl'));
     return { season: num(raw.season), week: num(raw.week), seasonType: str(raw.season_type) ?? 'regular', displayWeek: num(raw.display_week), leagueSeason: num(raw.league_season) } satisfies NflState;
   }),
-  league: (id: string) => cached(`league:${id}`, 2 * MINUTE, async () => parseLeague(await sleeperJson(`/v1/league/${id}`)), { disk: true }),
-  rosters: (id: string) => cached(`rosters:${id}`, MINUTE, async () => parseRosters(await sleeperJson(`/v1/league/${id}/rosters`))),
-  users: (id: string) => cached(`users:${id}`, 30 * MINUTE, async () => parseUsers(await sleeperJson(`/v1/league/${id}/users`)), { disk: true }),
+  league: (id: string) => cached(`league:${id}`, 2 * MINUTE, route(`/v1/league/${id}`, parseLeague), { disk: true }),
+  rosters: (id: string) => cached(`rosters:${id}`, MINUTE, route(`/v1/league/${id}/rosters`, parseRosters)),
+  users: (id: string) => cached(`users:${id}`, 30 * MINUTE, route(`/v1/league/${id}/users`, parseUsers), { disk: true }),
   /** Completed weeks of finished seasons never change; everything else refreshes. */
   matchups: (id: string, week: number, final = false) =>
-    cached(`matchups:${id}:${week}`, final ? FOREVER : MINUTE, async () => parseMatchups(await sleeperJson(`/v1/league/${id}/matchups/${week}`)), { disk: final }),
+    cached(`matchups:${id}:${week}`, final ? FOREVER : MINUTE, route(`/v1/league/${id}/matchups/${week}`, parseMatchups), { disk: final }),
   transactions: (id: string, week: number, final = false) =>
-    cached(`tx:${id}:${week}`, final ? FOREVER : 5 * MINUTE, async () => parseTransactions(await sleeperJson(`/v1/league/${id}/transactions/${week}`)), { disk: final }),
-  winnersBracket: (id: string, final = false) => cached(`wb:${id}`, final ? FOREVER : 10 * MINUTE, async () => parseBracket(await sleeperJson(`/v1/league/${id}/winners_bracket`)), { disk: final }),
-  losersBracket: (id: string, final = false) => cached(`lb:${id}`, final ? FOREVER : 10 * MINUTE, async () => parseBracket(await sleeperJson(`/v1/league/${id}/losers_bracket`)), { disk: final }),
-  trending: (type: 'add' | 'drop') => cached(`trending:${type}`, 15 * MINUTE, async () =>
-    arr(await sleeperJson(`/v1/players/nfl/trending/${type}?lookback_hours=48&limit=100`)).map(x => ({ id: str(obj(x).player_id) ?? '', count: num(obj(x).count) }))),
-  players: () => cached('players-v2', 12 * HOUR, loadPlayers, { disk: true, swr: true }),
+    cached(`tx:${id}:${week}`, final ? FOREVER : 5 * MINUTE, route(`/v1/league/${id}/transactions/${week}`, parseTransactions), { disk: final }),
+  winnersBracket: (id: string, final = false) => cached(`wb:${id}`, final ? FOREVER : 10 * MINUTE, route(`/v1/league/${id}/winners_bracket`, parseBracket), { disk: final }),
+  losersBracket: (id: string, final = false) => cached(`lb:${id}`, final ? FOREVER : 10 * MINUTE, route(`/v1/league/${id}/losers_bracket`, parseBracket), { disk: final }),
+  trending: (type: 'add' | 'drop') => cached(`trending:${type}`, 15 * MINUTE, route(`/v1/players/nfl/trending/${type}?lookback_hours=48&limit=100`, raw =>
+    arr(raw).map(x => ({ id: str(obj(x).player_id) ?? '', count: num(obj(x).count) })))),
+  players: () => cached('players-v2', 12 * HOUR, route('/v1/players/nfl', parsePlayers), { disk: true, swr: true }),
 };
 
 // ─── Players ─────────────────────────────────────────────────────────────────
@@ -307,10 +333,9 @@ function ageFrom(birthDate: string | null, fallback: number | null): number | nu
   return Math.floor(((Date.now() - born) / (365.25 * 24 * 3600 * 1000)) * 10) / 10;
 }
 
-async function loadPlayers(): Promise<Record<string, PlayerInfo>> {
-  const raw = obj(await sleeperJson('/v1/players/nfl'));
+function parsePlayers(raw: unknown): Record<string, PlayerInfo> {
   const out: Record<string, PlayerInfo> = {};
-  for (const [id, value] of Object.entries(raw)) {
+  for (const [id, value] of Object.entries(obj(raw))) {
     const row = obj(value);
     const pos = normalizePosition(str(row.position));
     if (!pos) continue;
@@ -353,7 +378,7 @@ export interface WeekLine {
   gameId: string | null;
   stats: Stats;
   /** Injury tag embedded in the row (fresher than the daily player catalogue), with its news time. */
-  injury?: { status: string | null; at: number | null };
+  injury?: { status: string | null; part: string | null; notes: string | null; at: number | null };
 }
 
 function parseWeekLines(value: unknown): WeekLine[] {
@@ -366,10 +391,31 @@ function parseWeekLines(value: unknown): WeekLine[] {
     if (!Object.keys(stats).length) continue;
     const player = row.player ? obj(row.player) : null;
     const line: WeekLine = { id, team: normalizeTeam(str(row.team)), opponent: normalizeTeam(str(row.opponent)), gameId: str(row.game_id), stats };
-    if (player) line.injury = { status: str(player.injury_status), at: numOrNull(player.news_updated) };
+    if (player) line.injury = { status: str(player.injury_status), part: str(player.injury_body_part), notes: str(player.injury_notes), at: numOrNull(player.news_updated) };
     out.push(line);
   }
   return out;
+}
+
+/**
+ * Writes into `out` the injury tags from weekly rows that are newer than the catalogue's. Each
+ * player gets the newest tag across the catalogue and every row, so a cleared tag sticks.
+ */
+export function applyInjuryTags(catalog: Readonly<Record<string, PlayerInfo>>, out: Record<string, PlayerInfo>, lines: Iterable<WeekLine>) {
+  const latest = new Map<string, NonNullable<WeekLine['injury']>>();
+  for (const line of lines) {
+    if (!line.injury) continue;
+    const seen = latest.get(line.id);
+    if (!seen || (line.injury.at ?? 0) > (seen.at ?? 0)) latest.set(line.id, line.injury);
+  }
+  for (const [pid, tag] of latest) {
+    const base = catalog[pid];
+    if (!base || (tag.at ?? 0) < (base.newsUpdated ?? 0)) continue;
+    const part = tag.part ?? null;
+    if (tag.status !== base.injuryStatus || part !== base.injuryBodyPart) {
+      out[pid] = { ...base, injuryStatus: tag.status, injuryBodyPart: part, injuryNotes: tag.notes ?? null, newsUpdated: tag.at ?? base.newsUpdated };
+    }
+  }
 }
 
 const lineSignatures = new WeakMap<WeekLine, number>();
@@ -395,7 +441,7 @@ export function linesSignature(lines: readonly WeekLine[]): number {
   for (const l of lines) {
     for (let i = 0; i < l.id.length; i++) h = (Math.imul(h, 31) + l.id.charCodeAt(i)) | 0;
     for (const k in l.stats) h = (Math.imul(h, 31) + Math.round(l.stats[k] * 100)) | 0;
-    const inj = l.injury?.status;
+    const inj = l.injury?.status && `${l.injury.status}${l.injury.part ?? ''}`;
     if (inj) for (let i = 0; i < inj.length; i++) h = (Math.imul(h, 31) + inj.charCodeAt(i)) | 0;
   }
   return h >>> 0;
@@ -413,12 +459,21 @@ function statsTtl(f: WeekFreshness): number {
 
 export function weekStats(f: WeekFreshness): Promise<WeekLine[]> {
   const ttl = statsTtl(f);
-  return cached(`stats:${f.season}:${f.week}`, ttl, async () => parseWeekLines(await sleeperJson(`/stats/nfl/${f.season}/${f.week}?season_type=regular`)), { disk: true, swr: ttl !== FOREVER });
+  return cached(`stats:${f.season}:${f.week}`, ttl, route(`/stats/nfl/${f.season}/${f.week}?season_type=regular`, parseWeekLines), { disk: true, swr: ttl !== FOREVER });
+}
+
+/**
+ * The current week's rows carry the freshest injury tags, so they are rechecked every few minutes
+ * (Sleeper's CDN refreshes every 10); later weeks change slowly. Unchanged copies cost a 304.
+ */
+function projectionsTtl(f: WeekFreshness): number {
+  if (f.season < f.currentSeason || f.week < f.currentWeek) return FOREVER;
+  return f.week === f.currentWeek ? 5 * MINUTE : 20 * MINUTE;
 }
 
 export function weekProjections(f: WeekFreshness): Promise<WeekLine[]> {
-  const ttl = f.season < f.currentSeason || f.week < f.currentWeek ? FOREVER : 20 * MINUTE;
-  return cached(`proj:${f.season}:${f.week}`, ttl, async () => parseWeekLines(await sleeperJson(`/projections/nfl/${f.season}/${f.week}?season_type=regular`)), { disk: true, swr: ttl !== FOREVER });
+  const ttl = projectionsTtl(f);
+  return cached(`proj:${f.season}:${f.week}`, ttl, route(`/projections/nfl/${f.season}/${f.week}?season_type=regular`, parseWeekLines), { disk: true, swr: ttl !== FOREVER });
 }
 
 // ─── NFL schedule (nflverse: kickoff times and betting lines) ────────────────
@@ -465,14 +520,17 @@ export function parseGames(text: string): NflGame[] {
   }));
 }
 
-export const nflGames = () => cached('nflverse:games', 3 * HOUR, async () => parseGames(await fetchText(NFLVERSE_GAMES)), { disk: true, swr: true });
+export const nflGames = () => cached('nflverse:games', 3 * HOUR, async rv => {
+  const text = await fetchText(NFLVERSE_GAMES, rv);
+  return text === NOT_MODIFIED ? text : parseGames(text);
+}, { disk: true, swr: true });
 
 /** Sleeper's live game status (pre_game / in_game / complete) for lock detection. */
-export const sleeperSchedule = (season: number) => cached(`schedule:${season}`, 5 * MINUTE, async () =>
-  arr(await sleeperJson(`/schedule/nfl/regular/${season}`)).map(x => {
+export const sleeperSchedule = (season: number) => cached(`schedule:${season}`, 5 * MINUTE, route(`/schedule/nfl/regular/${season}`, raw =>
+  arr(raw).map(x => {
     const row = obj(x);
     return { week: num(row.week), home: normalizeTeam(str(row.home)) ?? '', away: normalizeTeam(str(row.away)) ?? '', status: str(row.status) ?? 'pre_game', date: str(row.date) };
-  }));
+  })));
 
 /** Look up a Sleeper user's NFL leagues for the current (and previous) season. */
 export async function findLeagues(username: string) {

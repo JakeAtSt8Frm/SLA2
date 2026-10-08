@@ -4,9 +4,9 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { MINUTE } from './cache.ts';
+import { MINUTE, refreshesSettled } from './cache.ts';
 import {
-  lineSignature, linesSignature, nflGames, sleeper, sleeperSchedule, weekProjections, weekStats,
+  applyInjuryTags, lineSignature, linesSignature, nflGames, sleeper, sleeperSchedule, weekProjections, weekStats,
   type SleeperLeague, type SleeperMatchup, type SleeperRoster, type SleeperTransaction, type SleeperUser, type WeekLine,
 } from './sleeper.ts';
 import { sourceFor, type LeagueExtras, type Platform } from './source.ts';
@@ -273,15 +273,10 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
   const scoring = compileScoring(league.scoring);
   const slots = starterSlots(league.rosterPositions);
 
-  // Injury tags ride along with the (frequently refreshed) projection rows; prefer whichever is newer.
+  // Injury tags ride along with the (frequently refreshed) projection and stat rows.
   const players: Record<string, PlayerInfo> = Object.create(input.players) as Record<string, PlayerInfo>;
   Object.assign(players, input.extras.players);
-  for (const line of [...(futureProj[0] ?? []), ...liveStats]) {
-    const base = input.players[line.id];
-    if (!base || !line.injury) continue;
-    const newer = (line.injury.at ?? 0) >= (base.newsUpdated ?? 0);
-    if (newer && line.injury.status !== base.injuryStatus) players[line.id] = { ...base, injuryStatus: line.injury.status, newsUpdated: line.injury.at ?? base.newsUpdated };
-  }
+  applyInjuryTags(input.players, players, [...(futureProj[0] ?? []), ...liveStats]);
 
   const gameIndex = new Map<string, NflGame>();
   for (const g of games) { gameIndex.set(`${g.week}:${g.home}`, g); gameIndex.set(`${g.week}:${g.away}`, g); }
@@ -443,11 +438,14 @@ export function onCoreBuilt(listener: (core: LeagueCore) => void) {
   listeners.push(listener);
 }
 
-function rebuild(id: string): Promise<LeagueCore> {
+function rebuild(id: string, followUp = true): Promise<LeagueCore> {
   let p = rebuilding.get(id);
   if (!p) {
+    let settled: Promise<void> | null = null;
     p = (async () => {
       const input = await loadInputs(id);
+      // Some inputs may have been served stale (e.g. after a restart) while fresh copies download.
+      settled = followUp ? refreshesSettled() : null;
       const hit = cores.get(id);
       // Nothing changed upstream: keep the existing core (and every view already computed from it).
       if (hit && hit.fingerprint === input.fingerprint) {
@@ -466,6 +464,12 @@ function rebuild(id: string): Promise<LeagueCore> {
       return core;
     })().finally(() => rebuilding.delete(id));
     rebuilding.set(id, p);
+    // ...and rebuild once more as soon as they land, rather than when the freshness window runs out.
+    void p.then(async () => {
+      if (!settled) return;
+      await settled;
+      await rebuild(id, false);
+    }, () => undefined).catch(error => console.warn(`[core] follow-up refresh failed for ${id}:`, (error as Error).message));
   }
   return p;
 }

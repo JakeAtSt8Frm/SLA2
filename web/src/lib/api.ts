@@ -13,7 +13,10 @@ export type Waivers = Awaited<ReturnType<typeof V.waivers>>;
 export type Playoffs = Awaited<ReturnType<typeof V.playoffs>>;
 export type Power = Awaited<ReturnType<typeof V.powerView>>;
 export type Players = Awaited<ReturnType<typeof V.players>>;
-export type PlayerRow = Players['players'][number];
+/** A full player row (forecast range, kickoff, live state), as on rosters and lineups. */
+export type PlayerRow = TeamPage['roster'][number];
+/** The compact row of the long player tables (Players, waiver wire, trade pickers). */
+export type ListRow = Players['players'][number];
 export type PlayerDetail = Awaited<ReturnType<typeof V.player>>;
 export type Trade = Awaited<ReturnType<typeof V.trade>>;
 export type Recap = Awaited<ReturnType<typeof V.recap>>;
@@ -67,7 +70,7 @@ export function prefetchCore(client: QueryClient, id: string, rosterId: number |
   })();
 }
 
-export const useBootstrap = (id: string) => useQuery({ queryKey: ['bootstrap', id], queryFn: () => request<Bootstrap>(`${base(id)}/bootstrap`), staleTime: MIN, refetchInterval: 2 * MIN });
+export const useBootstrap = (id: string) => useQuery({ queryKey: ['bootstrap', id], queryFn: () => request<Bootstrap>(`${base(id)}/bootstrap`), staleTime: 30_000, refetchInterval: MIN });
 export const useOverview = (id: string) => useQuery({ queryKey: ['overview', id], queryFn: () => request<Overview>(`${base(id)}/overview`), staleTime: MIN, refetchInterval: 2 * MIN });
 export const useMatchups = (id: string, week?: number) => useQuery({ queryKey: ['matchups', id, week ?? 'current'], queryFn: () => request<Matchups>(`${base(id)}/matchups${week ? `?week=${week}` : ''}`), staleTime: MIN, refetchInterval: 90_000, placeholderData: prev => prev });
 export const useTeam = (id: string, rid: number | null) => useQuery({ queryKey: ['team', id, rid], queryFn: () => request<TeamPage>(`${base(id)}/teams/${rid}`), enabled: rid !== null, staleTime: MIN });

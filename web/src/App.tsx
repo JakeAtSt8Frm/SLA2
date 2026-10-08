@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType, type LazyExoticComponent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type LazyExoticComponent } from 'react';
 import { createPortal } from 'react-dom';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import {
@@ -117,6 +117,13 @@ function Shell() {
     }, 600);
     return () => clearTimeout(t);
   }, [client, leagueId, myTeamId]);
+  // The server rebuilt the league (new injury tags, projections or scores): refresh every page's data.
+  const built = useRef(boot.generatedAt);
+  useEffect(() => {
+    if (built.current === boot.generatedAt) return;
+    built.current = boot.generatedAt;
+    void client.invalidateQueries({ predicate: q => q.queryKey[1] === leagueId && q.queryKey[0] !== 'bootstrap' });
+  }, [client, leagueId, boot.generatedAt]);
   return (
     <div className="flex min-h-dvh">
       <aside className={cx('fixed inset-y-0 left-0 z-40 w-[248px] shrink-0 border-r border-line bg-surface transition-transform lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0', menu ? 'translate-x-0' : '-translate-x-full')}>

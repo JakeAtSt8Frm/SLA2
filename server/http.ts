@@ -32,7 +32,8 @@ export function prepare(data: object) {
 
 export function sendJson(c: Context, data: object, maxAge: number): Response {
   const e = encode(data);
-  c.header('Cache-Control', `private, max-age=${maxAge}`);
+  // League data always revalidates (an unchanged view is an empty 304), so a refetch never shows an older build.
+  c.header('Cache-Control', maxAge > 0 ? `private, max-age=${maxAge}` : 'private, no-cache');
   c.header('ETag', e.etag);
   c.header('Vary', 'Accept-Encoding');
   if (c.req.header('If-None-Match') === e.etag) return c.body(null, 304);
