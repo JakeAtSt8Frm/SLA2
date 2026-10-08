@@ -438,14 +438,32 @@ export function onCoreBuilt(listener: (core: LeagueCore) => void) {
   listeners.push(listener);
 }
 
+/** How long a build that nobody can be shown an older core for waits on stale inputs to refresh. */
+const STALE_INPUT_WAIT = 15_000;
+
+/** True if `task` settles within `ms`. */
+function settlesWithin(task: Promise<void>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<boolean>(resolve => { timer = setTimeout(resolve, ms, false); });
+  return Promise.race([task.then(() => true), timeout]).finally(() => clearTimeout(timer));
+}
+
 function rebuild(id: string, followUp = true): Promise<LeagueCore> {
   let p = rebuilding.get(id);
   if (!p) {
     let settled: Promise<void> | null = null;
     p = (async () => {
-      const input = await loadInputs(id);
-      // Some inputs may have been served stale (e.g. after a restart) while fresh copies download.
+      // After a restart there is no core to show while this one builds.
+      const before = cores.get(id);
+      const blocking = !before || Date.now() - before.at >= USABLE;
+      let input = await loadInputs(id);
+      // Some inputs may have been served stale (e.g. a disk cache from hours ago) while fresh copies download.
       settled = followUp ? refreshesSettled() : null;
+      // The caller is waiting anyway: give the fresh copies a moment rather than open on old injury tags.
+      if (settled && blocking && await settlesWithin(settled, STALE_INPUT_WAIT)) {
+        input = await loadInputs(id);
+        settled = refreshesSettled();
+      }
       const hit = cores.get(id);
       // Nothing changed upstream: keep the existing core (and every view already computed from it).
       if (hit && hit.fingerprint === input.fingerprint) {
@@ -464,7 +482,7 @@ function rebuild(id: string, followUp = true): Promise<LeagueCore> {
       return core;
     })().finally(() => rebuilding.delete(id));
     rebuilding.set(id, p);
-    // ...and rebuild once more as soon as they land, rather than when the freshness window runs out.
+    // Any still on their way: rebuild once more when they land, rather than when the freshness window runs out.
     void p.then(async () => {
       if (!settled) return;
       await settled;
