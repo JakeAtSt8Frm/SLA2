@@ -64,9 +64,10 @@ npm run verify:espn      # rescoring ESPN leagues from stat lines vs ESPN’s of
    reproduces **9,874 of 9,874** official player scores and all 216 team totals.
 2. **Projection model** (`engine/features.ts`, `research/train.py`): gradient-boosted trees start from
    Sleeper’s component projection rescored for the league, and correct it using recent form, snap share
-   and trend, per-snap tackle/big-play rates, projection-beating history, opponent points allowed,
-   opponent pace, Vegas implied totals and spreads, rest, venue and age. It predicts points *if the player
-   plays*, with monotonic constraints so better recent production can never lower a forecast.
+   and trend, per-snap tackle/big-play rates, projection-beating history, opponent points allowed and
+   opponent pace (this season’s games only), Vegas implied totals and spreads, rest, venue and age. It
+   predicts points *if the player plays*, with monotonic constraints so better recent production can never
+   lower a forecast.
 3. **Availability** comes from the injury tag, measured on 2020–26 official reports: Questionable starters
    (≥50% of recent snaps) played 72.5% of the time and Questionable reserves 60.5%, Doubtful 0.9%, Out 0.35%.
    Season-long value also counts the chance of getting hurt or benched before each future week: a healthy
@@ -83,17 +84,17 @@ npm run verify:espn      # rescoring ESPN leagues from stat lines vs ESPN’s of
 
 | On realistic start/sit candidates (4,536 player-games) | MAE | Pairs ordered right | Close calls (≤3 pts) |
 |---|---|---|---|
-| **SLA model** | **6.18** | **59.4%** | **56.5%** |
+| **SLA model** | **6.18** | **59.4%** | **56.6%** |
 | Sleeper projection, rescored for the league | 6.31 | 58.4% | 54.8% |
 | SLA 1.0-style linear recalibration | 6.24 | 58.4% | 54.8% |
 | Recent form only | 6.43 | 57.6% | 54.6% |
 
-The MAE gain over Sleeper is significant (95% CI −0.19 to −0.07 points) and concentrated in IDP, where the
-provider underrates sacks, INTs and pass breakups. 2026 weeks 1–3 (model trained through 2025): MAE 6.41 vs
-6.47, pairs ordered right 60.4% vs 58.3%. On this league’s real 2025 rosters, model-set lineups
+The MAE gain over Sleeper is significant (95% CI −0.18 to −0.07 points) and concentrated in IDP, where the
+provider underrates sacks, INTs and pass breakups. 2026 weeks 1–5 (model trained through 2025): MAE 6.40 vs
+6.46, pairs ordered right 60.6% vs 58.6%. On this league’s real 2025 rosters, model-set lineups
 scored **+28 pts/week over what managers actually started**. Versus lineups set from Sleeper’s own numbers
-the edge is +2.9 pts/week, which is too small to be statistically certain over one season
-(95% CI −0.9 to +6.9). Honest bottom line: most of the win comes from always fielding the best legal,
+the edge is +2.8 pts/week, which is too small to be statistically certain over one season
+(95% CI −0.4 to +6.4). Honest bottom line: most of the win comes from always fielding the best legal,
 injury-aware lineup across all 21 slots; the model adds a real but modest edge on top, mostly at DL/LB/DB.
 
 Tried in September 2026 and not adopted, because none held up on 2025 and 2026 after tuning on 2023–24:
@@ -114,11 +115,11 @@ D/ST ladder gets the *probability* of each bucket, not the one bucket the projec
   reproduces ESPN’s official points exactly, and all 202 team totals. `tests/fixtures/espn-parity.json`
   keeps 411 of them as a unit test.
 - **Models:** each league has its own model trained on its scoring (offense and kickers; no IDP). The trees’
-  correction to the provider is shrunk by a factor chosen on 2024 (O.J. 0.75, UK-BG 0.5). 2025 holdout MAE:
-  O.J. **5.32 vs 5.36** for the rescored provider projection (95% CI of the gap −0.08 to −0.00),
-  UK-BG **5.70 vs 5.72** (−0.06 to 0.00). That edge is small. Without IDP, Sleeper’s projections are already
-  good. On the O.J.’s real 2025 rosters, model lineups and provider lineups are a wash (−0.3 pts/week,
-  95% CI −1.0 to +0.3), and both beat what managers actually started by about +4 pts/week.
+  correction to the provider is shrunk by a factor chosen on 2024 (0.5 for both). 2025 holdout MAE:
+  O.J. **5.33 vs 5.36** for the rescored provider projection (95% CI of the gap −0.06 to −0.01),
+  UK-BG **5.70 vs 5.72** (−0.05 to −0.00). That edge is small. Without IDP, Sleeper’s projections are already
+  good. On the O.J.’s real 2025 rosters, model lineups and provider lineups are a wash (+0.1 pts/week,
+  95% CI −0.3 to +0.5), and both beat what managers actually started by about +4.5 pts/week.
 - **D/STs** use the rescored projection as the mean with the residual spread of every D/ST game since
   last season. A least-squares recalibration was tested out of sample and didn’t help.
 - **Credentials** live in `config/espn.json` (`swid`, `espn_s2`, league list), overridable with `ESPN_SWID` and

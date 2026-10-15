@@ -74,7 +74,7 @@ export const FEATURE_LABELS: Record<string, string> = {
   proj_pts: 'Provider projection (league scoring)', mean_cur: 'Season average', ewma: 'Recent-weighted average', mean_l4: 'Last 4 games',
   mean_prev: 'Last season average', snap_l4: 'Snap share (last 4)', snap_trend: 'Snap share trend', opps_l4: 'Touches + targets (last 4)',
   tkl_l4: 'Tackles per game (last 4)', big_rate: 'Big-play points per snap', exp_big_pts: 'Expected big-play points', proj_resid: 'Beats projections by',
-  opp_ratio: 'Opponent allows vs average', opp_plays_ratio: 'Opponent offensive pace', implied: 'Team implied points', spread: 'Point spread (team)',
+  opp_ratio: 'Opponent allows this season', opp_plays_ratio: 'Opponent pace this season', implied: 'Team implied points', spread: 'Point spread (team)',
   weeks_since: 'Weeks since last game', age: 'Age', proj_big_pts: 'Projected big-play points', proj_tkl_pts: 'Projected tackle points',
   sd_l16: 'Game-to-game volatility', n_prev: 'Games last season', mean_l16: 'Last 16 games average', proj_vs_form: 'Projection vs form',
   last1: 'Last game', max_l16: 'Best game (last 16)', snap_l1: 'Snap share (last game)', snaps_l4: 'Snaps (last 4)', has_proj: 'Has projection',

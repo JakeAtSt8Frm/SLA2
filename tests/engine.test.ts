@@ -194,6 +194,31 @@ describe('features', () => {
     const idx = (name: string) => FEATURE_NAMES.indexOf(name as (typeof FEATURE_NAMES)[number]);
     expect(warm.features('p', 2025, 7, undefined, undefined, 'X')[idx('n_cur')]).toBe(6);
   });
+
+  it('rate matchups on this season’s games only', () => {
+    const meta = () => ({ pos: 'WR' as Pos, birthDate: '2000-01-01', yearsExp: 3 });
+    const fs = new FeatureState(compileScoring({ rec: 1 }), meta);
+    // X plays A and Y plays B every week. A was the soft defense last season, B is this season.
+    const line = (id: string, team: string, opponent: string, rec: number) => ({ id, team, opponent, stats: { gp: 1, off_snp: 60, tm_off_snp: 60, rec } });
+    const week = (season: number, w: number, vsA: number, vsB: number) => fs.ingestWeek(season, w, [
+      line('a', 'X', 'A', vsA), line('xa', 'A', 'X', 8), line('b', 'Y', 'B', vsB), line('yb', 'B', 'Y', 8),
+    ]);
+    fs.startSeason(2025);
+    for (let w = 1; w <= 17; w++) week(2025, w, 12, 4);
+    fs.startSeason(2026);
+    const idx = (name: string) => FEATURE_NAMES.indexOf(name as (typeof FEATURE_NAMES)[number]);
+    const ctx = (opponent: string) => ({ opponent, home: true, kickoff: null, impliedTotal: null, opponentImplied: null, spread: null, total: null, rest: null, dome: false });
+    const vs = (opponent: string, name: string) => fs.features('a', 2026, 6, undefined, ctx(opponent), 'X')[idx(name)];
+    expect(vs('A', 'opp_ratio')).toBe(1);
+    expect(vs('B', 'opp_ratio')).toBe(1);
+    for (let w = 1; w <= 5; w++) week(2026, w, 4, 12);
+    fs.clearAverages();
+    expect(vs('A', 'opp_ratio')).toBeLessThan(1);
+    expect(vs('B', 'opp_ratio')).toBeGreaterThan(1);
+    // 60 points allowed in 5 games against a league average of 8, plus 4 games of prior at average.
+    expect(vs('B', 'opp_ratio')).toBeCloseTo((60 + 4 * 8) / (9 * 8));
+    expect(vs('B', 'opp_plays_ratio')).toBe(1);
+  });
 });
 
 describe('trained model', () => {

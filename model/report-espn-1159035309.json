@@ -2,9 +2,9 @@
  "meta": {
   "league": "The O.J. Invitantional",
   "key": "espn-1159035309",
-  "version": "2026.09.28",
-  "trainedAt": "2026-09-29T04:34:08Z",
-  "trainingRows": 45535,
+  "version": "2026.10.15",
+  "trainedAt": "2026-10-15T10:44:32Z",
+  "trainingRows": 46387,
   "seasons": [
    2020,
    2021,
@@ -23,49 +23,49 @@
   },
   "residualTarget": true,
   "iterations": 300,
-  "shrink": 0.75
+  "shrink": 0.5
  },
  "holdout2025": {
   "model": {
    "n": 2304,
-   "mae": 5.319,
-   "rmse": 6.782,
-   "bias": 0.286,
-   "spearman": 0.2332,
-   "pairAcc": 0.6116,
+   "mae": 5.33,
+   "rmse": 6.785,
+   "bias": 0.366,
+   "spearman": 0.2458,
+   "pairAcc": 0.614,
    "pairs": 33483,
-   "closePairAcc": 0.5497,
+   "closePairAcc": 0.5537,
    "closePairs": 19982,
    "byPos": {
     "QB": {
-     "mae": 5.985,
+     "mae": 5.977,
      "n": 288,
-     "bias": 0.052,
-     "pairAcc": 0.5347
+     "bias": 0.278,
+     "pairAcc": 0.5463
     },
     "RB": {
-     "mae": 5.79,
+     "mae": 5.81,
      "n": 702,
-     "bias": 0.236,
-     "pairAcc": 0.6441
+     "bias": 0.261,
+     "pairAcc": 0.6435
     },
     "WR": {
-     "mae": 5.535,
+     "mae": 5.551,
      "n": 702,
-     "bias": 0.761,
-     "pairAcc": 0.6078
+     "bias": 0.859,
+     "pairAcc": 0.6108
     },
     "TE": {
-     "mae": 4.644,
+     "mae": 4.647,
      "n": 324,
-     "bias": -0.163,
-     "pairAcc": 0.5817
+     "bias": -0.119,
+     "pairAcc": 0.5905
     },
     "K": {
-     "mae": 3.735,
+     "mae": 3.742,
      "n": 288,
-     "bias": -0.009,
-     "pairAcc": 0.5444
+     "bias": 0.053,
+     "pairAcc": 0.5454
     }
    }
   },
@@ -201,174 +201,174 @@
  },
  "live2026": {
   "model": {
-   "n": 384,
-   "mae": 5.618,
-   "rmse": 7.147,
-   "bias": -0.025,
-   "spearman": 0.1999,
-   "pairAcc": 0.6301,
-   "pairs": 5583,
-   "closePairAcc": 0.5392,
-   "closePairs": 3466,
+   "n": 640,
+   "mae": 5.732,
+   "rmse": 7.203,
+   "bias": -0.123,
+   "spearman": 0.2694,
+   "pairAcc": 0.6352,
+   "pairs": 9317,
+   "closePairAcc": 0.5533,
+   "closePairs": 5413,
    "byPos": {
     "QB": {
-     "mae": 6.851,
-     "n": 48,
-     "bias": -0.6,
-     "pairAcc": 0.5444
+     "mae": 6.545,
+     "n": 80,
+     "bias": -0.992,
+     "pairAcc": 0.5917
     },
     "RB": {
-     "mae": 5.453,
-     "n": 117,
-     "bias": 0.711,
-     "pairAcc": 0.6977
+     "mae": 5.687,
+     "n": 195,
+     "bias": 0.285,
+     "pairAcc": 0.6817
     },
     "WR": {
-     "mae": 5.89,
-     "n": 117,
-     "bias": -0.481,
-     "pairAcc": 0.6231
+     "mae": 6.116,
+     "n": 195,
+     "bias": -0.114,
+     "pairAcc": 0.6283
     },
     "TE": {
-     "mae": 5.691,
-     "n": 54,
-     "bias": -0.472,
-     "pairAcc": 0.5658
+     "mae": 5.516,
+     "n": 90,
+     "bias": -0.206,
+     "pairAcc": 0.5829
     },
     "K": {
-     "mae": 4.039,
-     "n": 48,
-     "bias": 0.371,
-     "pairAcc": 0.4112
+     "mae": 4.338,
+     "n": 80,
+     "bias": -0.179,
+     "pairAcc": 0.4939
     }
    }
   },
   "provider": {
-   "n": 384,
-   "mae": 5.699,
-   "rmse": 7.153,
-   "bias": 0.321,
-   "spearman": 0.1998,
-   "pairAcc": 0.6283,
-   "pairs": 5583,
-   "closePairAcc": 0.5364,
-   "closePairs": 3466,
+   "n": 640,
+   "mae": 5.767,
+   "rmse": 7.2,
+   "bias": 0.094,
+   "spearman": 0.2701,
+   "pairAcc": 0.6329,
+   "pairs": 9317,
+   "closePairAcc": 0.5494,
+   "closePairs": 5413,
    "byPos": {
     "QB": {
-     "mae": 7.12,
-     "n": 48,
-     "bias": 0.219,
-     "pairAcc": 0.5694
+     "mae": 6.621,
+     "n": 80,
+     "bias": -0.495,
+     "pairAcc": 0.6033
     },
     "RB": {
-     "mae": 5.447,
-     "n": 117,
-     "bias": 0.893,
-     "pairAcc": 0.6958
+     "mae": 5.699,
+     "n": 195,
+     "bias": 0.419,
+     "pairAcc": 0.679
     },
     "WR": {
-     "mae": 5.995,
-     "n": 117,
-     "bias": -0.055,
-     "pairAcc": 0.6209
+     "mae": 6.164,
+     "n": 195,
+     "bias": 0.14,
+     "pairAcc": 0.6258
     },
     "TE": {
-     "mae": 5.779,
-     "n": 54,
-     "bias": -0.194,
-     "pairAcc": 0.5658
+     "mae": 5.544,
+     "n": 90,
+     "bias": -0.046,
+     "pairAcc": 0.5763
     },
     "K": {
-     "mae": 4.08,
-     "n": 48,
-     "bias": 0.523,
-     "pairAcc": 0.3817
+     "mae": 4.362,
+     "n": 80,
+     "bias": -0.059,
+     "pairAcc": 0.4869
     }
    }
   },
   "linear": {
-   "n": 384,
-   "mae": 5.637,
-   "rmse": 7.177,
-   "bias": -0.133,
-   "spearman": 0.1998,
-   "pairAcc": 0.6283,
-   "pairs": 5583,
-   "closePairAcc": 0.5364,
-   "closePairs": 3466,
+   "n": 640,
+   "mae": 5.734,
+   "rmse": 7.236,
+   "bias": -0.363,
+   "spearman": 0.2701,
+   "pairAcc": 0.6329,
+   "pairs": 9317,
+   "closePairAcc": 0.5494,
+   "closePairs": 5413,
    "byPos": {
     "QB": {
-     "mae": 6.978,
-     "n": 48,
-     "bias": -0.765,
-     "pairAcc": 0.5694
+     "mae": 6.578,
+     "n": 80,
+     "bias": -1.462,
+     "pairAcc": 0.6033
     },
     "RB": {
-     "mae": 5.441,
-     "n": 117,
-     "bias": 0.748,
-     "pairAcc": 0.6958
+     "mae": 5.689,
+     "n": 195,
+     "bias": 0.28,
+     "pairAcc": 0.679
     },
     "WR": {
-     "mae": 5.938,
-     "n": 117,
-     "bias": -0.626,
-     "pairAcc": 0.6209
+     "mae": 6.114,
+     "n": 195,
+     "bias": -0.439,
+     "pairAcc": 0.6258
     },
     "TE": {
-     "mae": 5.696,
-     "n": 54,
-     "bias": -0.631,
-     "pairAcc": 0.5658
+     "mae": 5.511,
+     "n": 90,
+     "bias": -0.496,
+     "pairAcc": 0.5763
     },
     "K": {
-     "mae": 3.977,
-     "n": 48,
-     "bias": 0.116,
-     "pairAcc": 0.3817
+     "mae": 4.325,
+     "n": 80,
+     "bias": -0.501,
+     "pairAcc": 0.4869
     }
    }
   },
   "form": {
-   "n": 384,
-   "mae": 5.86,
-   "rmse": 7.473,
-   "bias": -0.011,
-   "spearman": 0.1654,
-   "pairAcc": 0.6128,
-   "pairs": 5583,
-   "closePairAcc": 0.5375,
-   "closePairs": 3466,
+   "n": 640,
+   "mae": 5.953,
+   "rmse": 7.538,
+   "bias": -0.286,
+   "spearman": 0.2109,
+   "pairAcc": 0.6092,
+   "pairs": 9317,
+   "closePairAcc": 0.5322,
+   "closePairs": 5413,
    "byPos": {
     "QB": {
-     "mae": 6.955,
-     "n": 48,
-     "bias": -0.343,
-     "pairAcc": 0.5333
+     "mae": 6.643,
+     "n": 80,
+     "bias": -1.081,
+     "pairAcc": 0.54
     },
     "RB": {
-     "mae": 5.841,
-     "n": 117,
-     "bias": 0.417,
-     "pairAcc": 0.6588
+     "mae": 6.03,
+     "n": 195,
+     "bias": -0.307,
+     "pairAcc": 0.6482
     },
     "WR": {
-     "mae": 5.843,
-     "n": 117,
-     "bias": -0.775,
-     "pairAcc": 0.6204
+     "mae": 6.204,
+     "n": 195,
+     "bias": -0.43,
+     "pairAcc": 0.6104
     },
     "TE": {
-     "mae": 6.086,
-     "n": 54,
-     "bias": 0.156,
-     "pairAcc": 0.5307
+     "mae": 5.879,
+     "n": 90,
+     "bias": 0.293,
+     "pairAcc": 0.5276
     },
     "K": {
-     "mae": 4.595,
-     "n": 48,
-     "bias": 0.949,
-     "pairAcc": 0.4556
+     "mae": 4.548,
+     "n": 80,
+     "bias": 0.257,
+     "pairAcc": 0.5306
     }
    }
   }
@@ -376,21 +376,23 @@
  "live2026Weeks": [
   1,
   2,
-  3
+  3,
+  4,
+  5
  ],
  "maeDeltaCI2025": [
-  -0.082,
-  -0.002
+  -0.055,
+  -0.006
  ],
  "coverage80": {
-  "QB": 0.7604,
-  "RB": 0.7678,
-  "WR": 0.7943,
-  "TE": 0.7739,
-  "K": 0.8133
+  "QB": 0.7635,
+  "RB": 0.7656,
+  "WR": 0.7972,
+  "TE": 0.7834,
+  "K": 0.8207
  },
  "availability": {
-  "none": 0.9872,
+  "none": 0.9862,
   "Questionable": 0.6742,
   "Doubtful": 0.0092,
   "Out": 0,
@@ -407,10 +409,10 @@
   },
   "ahead": {
    "WR": [
-    0.9349,
-    0.9046,
-    0.8857,
-    0.8711,
+    0.9341,
+    0.903,
+    0.884,
+    0.8695,
     0.8614,
     0.85,
     0.8426,
@@ -426,10 +428,10 @@
     0.736
    ],
    "TE": [
-    0.938,
-    0.9059,
-    0.8879,
-    0.8656,
+    0.9383,
+    0.9058,
+    0.8888,
+    0.867,
     0.8571,
     0.8553,
     0.8499,
@@ -445,10 +447,10 @@
     0.8137
    ],
    "RB": [
-    0.9277,
-    0.89,
-    0.8585,
-    0.8477,
+    0.9276,
+    0.8889,
+    0.8573,
+    0.8468,
     0.839,
     0.8348,
     0.8348,
@@ -464,10 +466,10 @@
     0.692
    ],
    "QB": [
-    0.9078,
-    0.8592,
-    0.8318,
-    0.8099,
+    0.9087,
+    0.8589,
+    0.8313,
+    0.81,
     0.7902,
     0.7723,
     0.7624,
@@ -483,10 +485,10 @@
     0.6099
    ],
    "K": [
-    0.9661,
-    0.9448,
-    0.9284,
-    0.9143,
+    0.9668,
+    0.9461,
+    0.9301,
+    0.9153,
     0.9062,
     0.9015,
     0.8934,
@@ -500,89 +502,108 @@
     0.8493,
     0.8493,
     0.8493
+   ],
+   "IDP": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
    ]
   }
  },
  "importance": [
   {
-   "feature": "proj_pts",
-   "share": 0.1246
+   "feature": "gap_ewma",
+   "share": 0.1127
   },
   {
-   "feature": "gap_ewma",
-   "share": 0.1099
+   "feature": "proj_pts",
+   "share": 0.1069
   },
   {
    "feature": "pass_att_l4",
-   "share": 0.0676
-  },
-  {
-   "feature": "opp_ratio",
-   "share": 0.0548
+   "share": 0.0731
   },
   {
    "feature": "proj_opps",
-   "share": 0.054
-  },
-  {
-   "feature": "max_l16",
-   "share": 0.0481
-  },
-  {
-   "feature": "tgt_l4",
-   "share": 0.0436
-  },
-  {
-   "feature": "snap_l1",
-   "share": 0.0434
-  },
-  {
-   "feature": "proj_pass_att",
-   "share": 0.0412
+   "share": 0.0565
   },
   {
    "feature": "team_plays_ratio",
-   "share": 0.0391
+   "share": 0.0524
+  },
+  {
+   "feature": "max_l16",
+   "share": 0.0458
+  },
+  {
+   "feature": "proj_pass_att",
+   "share": 0.0434
+  },
+  {
+   "feature": "opp_ratio",
+   "share": 0.0423
+  },
+  {
+   "feature": "snap_l1",
+   "share": 0.0422
   },
   {
    "feature": "proj_vs_form",
-   "share": 0.0384
+   "share": 0.0412
   },
   {
-   "feature": "proj_resid",
-   "share": 0.0324
+   "feature": "tgt_l4",
+   "share": 0.0388
   },
   {
    "feature": "mean_prev",
-   "share": 0.0321
+   "share": 0.0358
   },
   {
-   "feature": "weeks_since",
-   "share": 0.0231
-  },
-  {
-   "feature": "snaps_l4",
-   "share": 0.0194
+   "feature": "proj_resid",
+   "share": 0.0254
   },
   {
    "feature": "implied",
-   "share": 0.0191
+   "share": 0.0223
+  },
+  {
+   "feature": "snaps_l4",
+   "share": 0.021
+  },
+  {
+   "feature": "weeks_since",
+   "share": 0.0209
   },
   {
    "feature": "carry_l4",
-   "share": 0.0182
-  },
-  {
-   "feature": "spread",
-   "share": 0.0182
-  },
-  {
-   "feature": "snap_trend",
-   "share": 0.0167
+   "share": 0.0196
   },
   {
    "feature": "opp_plays_ratio",
-   "share": 0.0167
+   "share": 0.0194
+  },
+  {
+   "feature": "total",
+   "share": 0.0191
+  },
+  {
+   "feature": "spread",
+   "share": 0.0185
   }
  ],
  "cohort": {
@@ -596,53 +617,53 @@
   "season": 2025,
   "teamWeeks": 170,
   "perTeamWeek": {
-   "model": 97.45,
+   "model": 97.83,
    "provider": 97.74,
    "manager": 93.27,
    "optimal": 112.01
   },
-  "modelMinusProvider": -0.29,
+  "modelMinusProvider": 0.09,
   "modelMinusProviderCI": [
-   -0.99,
-   0.34
+   -0.32,
+   0.49
   ],
-  "modelMinusManager": 4.18,
-  "modelBeatProvider": 18,
-  "providerBeatModel": 15,
+  "modelMinusManager": 4.56,
+  "modelBeatProvider": 12,
+  "providerBeatModel": 8,
   "captureRate": {
-   "model": 0.87,
+   "model": 0.8734,
    "provider": 0.8726,
    "manager": 0.8327
   },
   "resultFlipsVsManager": {
-   "flips": 14,
+   "flips": 12,
    "games": 162
   },
   "byWeek": [
    {
     "week": 1,
-    "model": 86.72,
+    "model": 85.88,
     "provider": 86.34,
     "manager": 85.85,
     "optimal": 108.99
    },
    {
     "week": 2,
-    "model": 99.51,
+    "model": 98.93,
     "provider": 97.88,
     "manager": 95.89,
     "optimal": 118.41
    },
    {
     "week": 3,
-    "model": 90.93,
+    "model": 92.33,
     "provider": 92.14,
     "manager": 90.86,
     "optimal": 108.11
    },
    {
     "week": 4,
-    "model": 105.2,
+    "model": 106.43,
     "provider": 106.56,
     "manager": 101.53,
     "optimal": 119.67
@@ -656,7 +677,7 @@
    },
    {
     "week": 6,
-    "model": 96.89,
+    "model": 95.06,
     "provider": 95.7,
     "manager": 90.95,
     "optimal": 107.56
@@ -670,28 +691,28 @@
    },
    {
     "week": 8,
-    "model": 99.94,
+    "model": 102.16,
     "provider": 102.16,
     "manager": 97.37,
     "optimal": 116.04
    },
    {
     "week": 9,
-    "model": 105.04,
+    "model": 104.38,
     "provider": 104.52,
     "manager": 101.53,
     "optimal": 115.42
    },
    {
     "week": 10,
-    "model": 94.9,
+    "model": 96.27,
     "provider": 96.27,
     "manager": 89.83,
     "optimal": 106.03
    },
    {
     "week": 11,
-    "model": 89.65,
+    "model": 90.43,
     "provider": 92.39,
     "manager": 89.32,
     "optimal": 106.79
@@ -712,28 +733,28 @@
    },
    {
     "week": 14,
-    "model": 95.03,
+    "model": 96.88,
     "provider": 96.88,
     "manager": 90.76,
     "optimal": 107.73
    },
    {
     "week": 15,
-    "model": 106.37,
+    "model": 107.79,
     "provider": 107.54,
     "manager": 99.67,
     "optimal": 123.49
    },
    {
     "week": 16,
-    "model": 109.82,
+    "model": 108.74,
     "provider": 108.27,
     "manager": 101.53,
     "optimal": 122.47
    },
    {
     "week": 17,
-    "model": 87.45,
+    "model": 88.61,
     "provider": 86.9,
     "manager": 86.75,
     "optimal": 102.76
@@ -741,7 +762,7 @@
   ],
   "parity": {
    "checked": 400,
-   "maxDiff": 0.0000075908628494048
+   "maxDiff": 0.000006738864358979413
   }
  }
 }

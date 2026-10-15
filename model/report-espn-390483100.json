@@ -2,9 +2,9 @@
  "meta": {
   "league": "UK-BG",
   "key": "espn-390483100",
-  "version": "2026.09.28",
-  "trainedAt": "2026-09-29T04:32:48Z",
-  "trainingRows": 45535,
+  "version": "2026.10.15",
+  "trainedAt": "2026-10-15T10:43:37Z",
+  "trainingRows": 46387,
   "seasons": [
    2020,
    2021,
@@ -28,44 +28,44 @@
  "holdout2025": {
   "model": {
    "n": 2304,
-   "mae": 5.698,
-   "rmse": 7.248,
-   "bias": 0.393,
-   "spearman": 0.2424,
-   "pairAcc": 0.6169,
+   "mae": 5.7,
+   "rmse": 7.249,
+   "bias": 0.389,
+   "spearman": 0.24,
+   "pairAcc": 0.6168,
    "pairs": 33480,
-   "closePairAcc": 0.5484,
+   "closePairAcc": 0.5483,
    "closePairs": 18434,
    "byPos": {
     "QB": {
-     "mae": 6.208,
+     "mae": 6.224,
      "n": 288,
-     "bias": 0.285,
-     "pairAcc": 0.5458
+     "bias": 0.29,
+     "pairAcc": 0.5444
     },
     "RB": {
-     "mae": 6.018,
+     "mae": 6.026,
      "n": 702,
-     "bias": 0.224,
-     "pairAcc": 0.6513
+     "bias": 0.208,
+     "pairAcc": 0.6509
     },
     "WR": {
-     "mae": 6.183,
+     "mae": 6.179,
      "n": 702,
-     "bias": 0.929,
-     "pairAcc": 0.613
+     "bias": 0.934,
+     "pairAcc": 0.6138
     },
     "TE": {
-     "mae": 5.235,
+     "mae": 5.228,
      "n": 324,
-     "bias": -0.026,
-     "pairAcc": 0.5836
+     "bias": -0.033,
+     "pairAcc": 0.5873
     },
     "K": {
-     "mae": 3.749,
+     "mae": 3.741,
      "n": 288,
-     "bias": 0.073,
-     "pairAcc": 0.5379
+     "bias": 0.076,
+     "pairAcc": 0.53
     }
    }
   },
@@ -201,174 +201,174 @@
  },
  "live2026": {
   "model": {
-   "n": 384,
-   "mae": 6.059,
-   "rmse": 7.693,
-   "bias": 0.083,
-   "spearman": 0.2238,
-   "pairAcc": 0.6419,
-   "pairs": 5583,
-   "closePairAcc": 0.5464,
-   "closePairs": 3146,
+   "n": 640,
+   "mae": 6.22,
+   "rmse": 7.856,
+   "bias": -0.227,
+   "spearman": 0.262,
+   "pairAcc": 0.6375,
+   "pairs": 9315,
+   "closePairAcc": 0.5492,
+   "closePairs": 4960,
    "byPos": {
     "QB": {
-     "mae": 7.171,
-     "n": 48,
-     "bias": -0.021,
-     "pairAcc": 0.5944
+     "mae": 6.783,
+     "n": 80,
+     "bias": -0.995,
+     "pairAcc": 0.607
     },
     "RB": {
-     "mae": 5.552,
-     "n": 117,
-     "bias": 0.751,
-     "pairAcc": 0.7037
+     "mae": 5.877,
+     "n": 195,
+     "bias": 0.194,
+     "pairAcc": 0.6789
     },
     "WR": {
-     "mae": 6.774,
-     "n": 117,
-     "bias": -0.343,
-     "pairAcc": 0.6454
+     "mae": 7.027,
+     "n": 195,
+     "bias": -0.184,
+     "pairAcc": 0.6445
     },
     "TE": {
-     "mae": 6.389,
-     "n": 54,
-     "bias": -0.676,
-     "pairAcc": 0.5667
+     "mae": 6.386,
+     "n": 90,
+     "bias": -0.619,
+     "pairAcc": 0.5558
     },
     "K": {
-     "mae": 4.065,
-     "n": 48,
-     "bias": 0.453,
-     "pairAcc": 0.3669
+     "mae": 4.335,
+     "n": 80,
+     "bias": -0.151,
+     "pairAcc": 0.4641
     }
    }
   },
   "provider": {
-   "n": 384,
-   "mae": 6.133,
-   "rmse": 7.723,
-   "bias": 0.342,
-   "spearman": 0.2202,
-   "pairAcc": 0.6414,
-   "pairs": 5583,
-   "closePairAcc": 0.5455,
-   "closePairs": 3146,
+   "n": 640,
+   "mae": 6.265,
+   "rmse": 7.863,
+   "bias": 0.004,
+   "spearman": 0.274,
+   "pairAcc": 0.638,
+   "pairs": 9315,
+   "closePairAcc": 0.5502,
+   "closePairs": 4960,
    "byPos": {
     "QB": {
-     "mae": 7.364,
-     "n": 48,
-     "bias": 0.424,
-     "pairAcc": 0.5944
+     "mae": 6.862,
+     "n": 80,
+     "bias": -0.564,
+     "pairAcc": 0.6171
     },
     "RB": {
-     "mae": 5.578,
-     "n": 117,
-     "bias": 0.881,
-     "pairAcc": 0.7019
+     "mae": 5.919,
+     "n": 195,
+     "bias": 0.334,
+     "pairAcc": 0.6773
     },
     "WR": {
-     "mae": 6.867,
-     "n": 117,
-     "bias": 0.041,
-     "pairAcc": 0.6418
+     "mae": 7.076,
+     "n": 195,
+     "bias": 0.131,
+     "pairAcc": 0.6405
     },
     "TE": {
-     "mae": 6.48,
-     "n": 54,
-     "bias": -0.407,
-     "pairAcc": 0.5755
+     "mae": 6.416,
+     "n": 90,
+     "bias": -0.424,
+     "pairAcc": 0.565
     },
     "K": {
-     "mae": 4.08,
-     "n": 48,
-     "bias": 0.523,
-     "pairAcc": 0.3817
+     "mae": 4.362,
+     "n": 80,
+     "bias": -0.059,
+     "pairAcc": 0.4869
     }
    }
   },
   "linear": {
-   "n": 384,
-   "mae": 6.082,
-   "rmse": 7.752,
-   "bias": -0.175,
-   "spearman": 0.2202,
-   "pairAcc": 0.6414,
-   "pairs": 5583,
-   "closePairAcc": 0.5455,
-   "closePairs": 3146,
+   "n": 640,
+   "mae": 6.245,
+   "rmse": 7.908,
+   "bias": -0.516,
+   "spearman": 0.274,
+   "pairAcc": 0.638,
+   "pairs": 9315,
+   "closePairAcc": 0.5502,
+   "closePairs": 4960,
    "byPos": {
     "QB": {
-     "mae": 7.232,
-     "n": 48,
-     "bias": -0.643,
-     "pairAcc": 0.5944
+     "mae": 6.855,
+     "n": 80,
+     "bias": -1.609,
+     "pairAcc": 0.6171
     },
     "RB": {
-     "mae": 5.571,
-     "n": 117,
-     "bias": 0.687,
-     "pairAcc": 0.7019
+     "mae": 5.91,
+     "n": 195,
+     "bias": 0.148,
+     "pairAcc": 0.6773
     },
     "WR": {
-     "mae": 6.819,
-     "n": 117,
-     "bias": -0.616,
-     "pairAcc": 0.6418
+     "mae": 7.031,
+     "n": 195,
+     "bias": -0.533,
+     "pairAcc": 0.6405
     },
     "TE": {
-     "mae": 6.441,
-     "n": 54,
-     "bias": -0.929,
-     "pairAcc": 0.5755
+     "mae": 6.434,
+     "n": 90,
+     "bias": -0.958,
+     "pairAcc": 0.565
     },
     "K": {
-     "mae": 3.977,
-     "n": 48,
-     "bias": 0.116,
-     "pairAcc": 0.3817
+     "mae": 4.325,
+     "n": 80,
+     "bias": -0.501,
+     "pairAcc": 0.4869
     }
    }
   },
   "form": {
-   "n": 384,
-   "mae": 6.333,
-   "rmse": 8.098,
-   "bias": -0.01,
-   "spearman": 0.1695,
-   "pairAcc": 0.6128,
-   "pairs": 5583,
-   "closePairAcc": 0.5308,
-   "closePairs": 3146,
+   "n": 640,
+   "mae": 6.495,
+   "rmse": 8.262,
+   "bias": -0.381,
+   "spearman": 0.2056,
+   "pairAcc": 0.6077,
+   "pairs": 9315,
+   "closePairAcc": 0.5248,
+   "closePairs": 4960,
    "byPos": {
     "QB": {
-     "mae": 7.238,
-     "n": 48,
-     "bias": -0.119,
-     "pairAcc": 0.5333
+     "mae": 6.883,
+     "n": 80,
+     "bias": -1.135,
+     "pairAcc": 0.5401
     },
     "RB": {
-     "mae": 6.064,
-     "n": 117,
-     "bias": 0.409,
-     "pairAcc": 0.6572
+     "mae": 6.334,
+     "n": 195,
+     "bias": -0.406,
+     "pairAcc": 0.6448
     },
     "WR": {
-     "mae": 6.718,
-     "n": 117,
-     "bias": -0.729,
-     "pairAcc": 0.6238
+     "mae": 7.148,
+     "n": 195,
+     "bias": -0.416,
+     "pairAcc": 0.6118
     },
     "TE": {
-     "mae": 6.82,
-     "n": 54,
-     "bias": -0.118,
-     "pairAcc": 0.523
+     "mae": 6.814,
+     "n": 90,
+     "bias": -0.152,
+     "pairAcc": 0.5191
     },
     "K": {
-     "mae": 4.595,
-     "n": 48,
-     "bias": 0.949,
-     "pairAcc": 0.4556
+     "mae": 4.548,
+     "n": 80,
+     "bias": 0.257,
+     "pairAcc": 0.5306
     }
    }
   }
@@ -376,21 +376,23 @@
  "live2026Weeks": [
   1,
   2,
-  3
+  3,
+  4,
+  5
  ],
  "maeDeltaCI2025": [
-  -0.055,
-  0.003
+  -0.049,
+  -0.001
  ],
  "coverage80": {
-  "QB": 0.7774,
-  "RB": 0.7745,
-  "WR": 0.8019,
+  "QB": 0.7682,
+  "RB": 0.7739,
+  "WR": 0.8044,
   "TE": 0.7769,
   "K": 0.8096
  },
  "availability": {
-  "none": 0.9872,
+  "none": 0.9862,
   "Questionable": 0.6742,
   "Doubtful": 0.0092,
   "Out": 0,
@@ -407,10 +409,10 @@
   },
   "ahead": {
    "WR": [
-    0.9349,
-    0.9046,
-    0.8857,
-    0.8711,
+    0.9341,
+    0.903,
+    0.884,
+    0.8695,
     0.8614,
     0.85,
     0.8426,
@@ -426,10 +428,10 @@
     0.736
    ],
    "TE": [
-    0.938,
-    0.9059,
-    0.8879,
-    0.8656,
+    0.9383,
+    0.9058,
+    0.8888,
+    0.867,
     0.8571,
     0.8553,
     0.8499,
@@ -445,10 +447,10 @@
     0.8137
    ],
    "RB": [
-    0.9277,
-    0.89,
-    0.8585,
-    0.8477,
+    0.9276,
+    0.8889,
+    0.8573,
+    0.8468,
     0.839,
     0.8348,
     0.8348,
@@ -464,10 +466,10 @@
     0.692
    ],
    "QB": [
-    0.9078,
-    0.8592,
-    0.8318,
-    0.8099,
+    0.9087,
+    0.8589,
+    0.8313,
+    0.81,
     0.7902,
     0.7723,
     0.7624,
@@ -483,10 +485,10 @@
     0.6099
    ],
    "K": [
-    0.9661,
-    0.9448,
-    0.9284,
-    0.9143,
+    0.9668,
+    0.9461,
+    0.9301,
+    0.9153,
     0.9062,
     0.9015,
     0.8934,
@@ -500,89 +502,108 @@
     0.8493,
     0.8493,
     0.8493
+   ],
+   "IDP": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
    ]
   }
  },
  "importance": [
   {
    "feature": "proj_pts",
-   "share": 0.1413
+   "share": 0.1371
   },
   {
    "feature": "gap_ewma",
-   "share": 0.1086
+   "share": 0.1123
   },
   {
    "feature": "max_l16",
-   "share": 0.0572
-  },
-  {
-   "feature": "opp_ratio",
-   "share": 0.0536
+   "share": 0.0661
   },
   {
    "feature": "snap_l1",
-   "share": 0.0515
-  },
-  {
-   "feature": "proj_opps",
-   "share": 0.0503
-  },
-  {
-   "feature": "tgt_l4",
-   "share": 0.0461
-  },
-  {
-   "feature": "pass_att_l4",
-   "share": 0.0435
+   "share": 0.0582
   },
   {
    "feature": "team_plays_ratio",
-   "share": 0.0426
+   "share": 0.0553
   },
   {
-   "feature": "implied",
-   "share": 0.0295
+   "feature": "tgt_l4",
+   "share": 0.0509
+  },
+  {
+   "feature": "pass_att_l4",
+   "share": 0.0437
+  },
+  {
+   "feature": "proj_opps",
+   "share": 0.0386
+  },
+  {
+   "feature": "opp_ratio",
+   "share": 0.0379
   },
   {
    "feature": "mean_prev",
-   "share": 0.0285
-  },
-  {
-   "feature": "weeks_since",
-   "share": 0.0279
+   "share": 0.035
   },
   {
    "feature": "proj_resid",
-   "share": 0.0276
-  },
-  {
-   "feature": "proj_pass_att",
-   "share": 0.0253
+   "share": 0.0267
   },
   {
    "feature": "proj_vs_form",
-   "share": 0.0245
+   "share": 0.0237
   },
   {
    "feature": "snaps_l4",
-   "share": 0.02
+   "share": 0.0232
   },
   {
-   "feature": "opp_plays_ratio",
-   "share": 0.0191
+   "feature": "proj_pass_att",
+   "share": 0.0226
   },
   {
-   "feature": "carry_l4",
-   "share": 0.0176
+   "feature": "weeks_since",
+   "share": 0.0226
   },
   {
    "feature": "total",
-   "share": 0.017
+   "share": 0.0223
   },
   {
    "feature": "gap_l16",
-   "share": 0.0169
+   "share": 0.0212
+  },
+  {
+   "feature": "carry_l4",
+   "share": 0.0202
+  },
+  {
+   "feature": "implied",
+   "share": 0.0194
+  },
+  {
+   "feature": "snap_trend",
+   "share": 0.0157
   }
  ],
  "cohort": {
@@ -595,7 +616,7 @@
  "lineupBacktest": {
   "parity": {
    "checked": 400,
-   "maxDiff": 0.000006467585297542655
+   "maxDiff": 0.000008527724798312875
   }
  }
 }

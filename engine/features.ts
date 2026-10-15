@@ -4,6 +4,7 @@
  *
  * Everything is causal: features for (season, week) only use games ingested before it,
  * limited to the current and previous season so live serving can reproduce it exactly.
+ * Matchup features (opponent points allowed, opponent and team pace) use the current season only.
  */
 import { completeStats, didPlay, hasForecast, scoreStatsExact } from './scoring.ts';
 import type { GameContext, Pos, Stats } from './types.ts';
@@ -198,34 +199,26 @@ export class FeatureState {
     return a;
   }
 
-  /** Opponent points allowed to a position, relative to league average, shrunk toward last season. */
+  /**
+   * Opponent points allowed to a position relative to league average, from this season's games
+   * only (neutral before the opponent has played), shrunk toward average while the sample is small.
+   */
   private oppRatio(season: number, opp: string, pos: Pos): number {
     const K = 4;
     const cur = this.averages(season);
-    const prev = this.averages(season - 1);
-    const perGame = (a: typeof cur) => (a.games ? (a.allowed.get(pos) ?? 0) / a.games : 0);
-    const avgCur = perGame(cur), avgPrev = perGame(prev);
-    const base = cur.games >= 32 ? avgCur : avgPrev || avgCur;
-    if (!base) return 1;
-    const prevTeam = this.teams.get(`${season - 1}:${opp}`);
-    const prior = prevTeam?.games && avgPrev ? Math.min(1.6, Math.max(0.6, (prevTeam.allowed.get(pos) ?? 0) / prevTeam.games / avgPrev)) : 1;
-    const curTeam = this.teams.get(`${season}:${opp}`);
-    const sum = curTeam ? curTeam.allowed.get(pos) ?? 0 : 0;
-    const g = curTeam?.games ?? 0;
-    return (sum + K * base * prior) / ((g + K) * base);
+    const base = cur.games ? (cur.allowed.get(pos) ?? 0) / cur.games : 0;
+    const team = this.teams.get(`${season}:${opp}`);
+    if (!base || !team?.games) return 1;
+    return ((team.allowed.get(pos) ?? 0) + K * base) / ((team.games + K) * base);
   }
 
+  /** Team snaps per game relative to league average, this season only, shrunk like `oppRatio`. */
   private playsRatio(season: number, team: string, kind: 'off' | 'def'): number {
     const K = 3;
-    const cur = this.averages(season), prev = this.averages(season - 1);
-    const avg = (cur.games >= 32 ? cur[kind] : prev[kind] || cur[kind]) || 1;
-    const prevTeam = this.teams.get(`${season - 1}:${team}`);
-    const prevAvg = prev[kind] || avg;
-    const prior = prevTeam?.games ? (kind === 'off' ? prevTeam.offSnaps : prevTeam.defSnaps) / prevTeam.games / prevAvg : 1;
-    const curTeam = this.teams.get(`${season}:${team}`);
-    const sum = curTeam ? (kind === 'off' ? curTeam.offSnaps : curTeam.defSnaps) : 0;
-    const g = curTeam?.games ?? 0;
-    return (sum + K * avg * prior) / ((g + K) * avg);
+    const avg = this.averages(season)[kind];
+    const ts = this.teams.get(`${season}:${team}`);
+    if (!avg || !ts?.games) return 1;
+    return ((kind === 'off' ? ts.offSnaps : ts.defSnaps) + K * avg) / ((ts.games + K) * avg);
   }
 
   private posRates(season: number, pos: Pos) {
