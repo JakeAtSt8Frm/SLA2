@@ -221,24 +221,17 @@ and points, live projections and win odds move with them. The Trade lab runs in 
 per-league kit (`engine/trade.ts`, the same code the server uses). Opening an arbitrary Sleeper league by
 username or ID needs the Node server; the Pages build serves the configured leagues.
 
-One-time setup (Pages on a private repository needs a paid plan such as GitHub Pro): turn Pages on with
-GitHub Actions as the source, switch the deploy job on, and run it once:
-
-```bash
-gh api -X POST repos/JakeAtSt8Frm/SLA2/pages -f build_type=workflow
-gh variable set PAGES_ENABLED --body true --repo JakeAtSt8Frm/SLA2
-gh workflow enable deploy.yml --repo JakeAtSt8Frm/SLA2
-gh workflow run deploy.yml --repo JakeAtSt8Frm/SLA2
-```
-
-Until then the deploy job is skipped and the Node server (Render, `render.yaml`) keeps serving the app;
-once the Pages site is up, delete the Render service in Render's dashboard and remove `render.yaml`. The site is at `https://<owner>.github.io/<repo>/`, and anyone with
-the link can open it, as with any Pages site. ESPN cookies come from `config/espn.json`, or from the
+The site is at https://jakeatst8frm.github.io/SLA2/ (Pages on a private repository needs a paid plan such as
+GitHub Pro; anyone with the link can open it). The deploy job runs only while the repository variable
+`PAGES_ENABLED` is `true`. To set it up again elsewhere: turn Pages on with GitHub Actions as the source
+(`gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow`), set the variable, and run the workflow.
+ESPN cookies come from `config/espn.json`, or from the
 `ESPN_SWID` / `ESPN_S2` repository secrets if set. Each run restores the Sleeper cache and the saved pregame
 forecasts (Actions cache, the copy published under `data/snapshots/`, and the forecasts saved before the
 move to GitHub in `data/snapshot-seed/`). A league that fails to build,
-for example after the ESPN login expires, keeps its last published data. On a private repository a
-deploy costs about 2 Actions minutes: roughly 1,500 of the 3,000 monthly minutes in season.
+for example after the ESPN login expires, keeps its last published data. A deploy takes under a minute
+(the first took 41 s), so on a private repository the schedule uses roughly 850 of Pro's 3,000 monthly
+Actions minutes in season, plus about 120 for the weekly retrain.
 
 `.github/workflows/retrain.yml` retrains all three models every Wednesday (after Monday night's game),
 runs `npm run check` (including the TypeScript-vs-scikit-learn parity test), commits the model files and
