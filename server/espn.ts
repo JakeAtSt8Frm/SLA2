@@ -25,8 +25,9 @@ function loadConfig(): EspnConfig {
     file = JSON.parse(readFileSync(path.resolve(import.meta.dirname, '..', 'config', 'espn.json'), 'utf8'));
   } catch { /* no ESPN leagues configured */ }
   return {
-    swid: process.env.ESPN_SWID ?? file.swid ?? '',
-    espnS2: process.env.ESPN_S2 ?? file.espn_s2 ?? '',
+    // An unset CI secret arrives as an empty string: fall back to the file then too.
+    swid: process.env.ESPN_SWID || file.swid || '',
+    espnS2: process.env.ESPN_S2 || file.espn_s2 || '',
     leagues: file.leagues ?? [],
   };
 }

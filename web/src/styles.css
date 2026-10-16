@@ -112,6 +112,12 @@ body {
   text-rendering: optimizeLegibility;
 }
 #root { min-height: 100dvh; }
+/* viewport-fit=cover: keep content clear of the notch in landscape and the status bar on the home screen. */
+body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+/* No rubber-band scroll chaining from a drawer or menu into the page behind it. */
+.overscroll-contain { overscroll-behavior: contain; }
 
 .num { font-variant-numeric: tabular-nums; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
@@ -129,6 +135,11 @@ body {
 .tbl tbody tr.row-hover:hover td { background: var(--surface-2); }
 .tbl th.r, .tbl td.r { text-align: right; }
 .tbl th button { font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
+
+/* First column stays put while a wide table scrolls sideways (phones). */
+.tbl .sticky-col { position: sticky; left: 0; z-index: 2; background: var(--surface); }
+.tbl thead .sticky-col { z-index: 3; }
+.tbl tbody tr.bg-accent-soft td.sticky-col { background: color-mix(in oklab, var(--accent) 12%, var(--surface)); }
 
 /* Scrollbars stay quiet */
 .scroll-thin { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }

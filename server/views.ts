@@ -7,13 +7,13 @@ import { sleeper, type SleeperMatchup } from './sleeper.ts';
 import { sourceFor } from './source.ts';
 import { configuredEspnLeagues } from './espn.ts';
 import { explainInputs, outcomeOf, type WeekForecast } from '../engine/forecast.ts';
-import { exceedProbability, normalCdf } from '../engine/distribution.ts';
-import { bestLineup, lineupStats } from '../engine/lineup.ts';
+import { exceedProbability, normalCdf, variance } from '../engine/distribution.ts';
+import { lineupStats } from '../engine/lineup.ts';
 import { powerRankings } from '../engine/power.ts';
 import { seasonAwards, summarizeSeason, type TeamWeek } from '../engine/recap.ts';
 import { compileScoring, didPlay, hasForecast, round, scoreBreakdown, scoreStats, categoryPoints, completeStats, STAT_LABELS } from '../engine/scoring.ts';
 import { simulateMatchup, simulateSeason, type TeamWeekDist } from '../engine/simulate.ts';
-import { analyzeTradeSide } from '../engine/trade.ts';
+import { evaluateTrade, lineupDist, TradeError, type TradeKit, type TradeRequest } from '../engine/trade.ts';
 import { waiverRecommendations } from '../engine/waivers.ts';
 import { buildDefenseIndex, type DefenseRow } from '../engine/defense.ts';
 import { canFill, starterSlots } from '../engine/positions.ts';
@@ -94,6 +94,11 @@ function forecastView(f: WeekForecast | undefined) {
     boom: pct(exceedProbability(outcomeOf(f), Math.max(10, f.mean * 1.5))),
     bust: pct(1 - exceedProbability(outcomeOf(f), f.mean * 0.5)),
   };
+}
+
+function pregameDist(f: WeekForecast | undefined) {
+  if (!f || f.bye) return null;
+  return { mean: r2(f.mean), sd: r2(Math.sqrt(variance({ mean: f.mean, play: 1, residuals: f.residuals }))), play: pct(f.play) };
 }
 
 function playerRow(core: LeagueCore, id: string) {
@@ -180,21 +185,22 @@ function teamDist(core: LeagueCore, rosterId: number, week: number, asOptimized 
   return lineupDist(l, asOptimized ? 1 : managerFactor(core, rosterId));
 }
 
-// Player errors are close to independent across NFL teams; add a small common-mode term.
-const lineupDist = (l: { expected: number; sd: number }, factor: number): TeamWeekDist =>
-  ({ mean: l.expected * factor, sd: Math.sqrt(l.sd ** 2 + (0.03 * l.expected * factor) ** 2) });
+
+/** Regular-season games from the current week on, as roster pairs. */
+function remainingGames(core: LeagueCore): { week: number; a: number; b: number }[] {
+  const remaining: { week: number; a: number; b: number }[] = [];
+  if (core.week === null) return remaining;
+  for (let w = core.week; w <= core.lastRegularWeek; w++) {
+    const byMatch = new Map<number, number[]>();
+    for (const m of core.schedule.get(w) ?? []) if (m.matchupId !== null) byMatch.set(m.matchupId, [...(byMatch.get(m.matchupId) ?? []), m.rosterId]);
+    for (const pair of byMatch.values()) if (pair.length === 2) remaining.push({ week: w, a: pair[0], b: pair[1] });
+  }
+  return remaining;
+}
 
 function seasonSim(core: LeagueCore) {
   return once(core, 'seasonSim', () => {
-    const remaining: { week: number; a: number; b: number }[] = [];
-    if (core.week !== null) {
-      for (let w = core.week; w <= core.lastRegularWeek; w++) {
-        const ms = core.schedule.get(w) ?? [];
-        const byMatch = new Map<number, number[]>();
-        for (const m of ms) if (m.matchupId !== null) byMatch.set(m.matchupId, [...(byMatch.get(m.matchupId) ?? []), m.rosterId]);
-        for (const pair of byMatch.values()) if (pair.length === 2) remaining.push({ week: w, a: pair[0], b: pair[1] });
-      }
-    }
+    const remaining = remainingGames(core);
     const shape = playoffShape(core.league);
     return simulateSeason({
       teams: core.teams.map(t => t.rosterId),
@@ -334,17 +340,23 @@ async function matchupsView(core: LeagueCore, week: number) {
       const lineup = starterSlots(core.league.rosterPositions).map((slot, i) => {
         const pid = starters[i] ?? null;
         const f = pid ? forecasts?.get(pid) : undefined;
+        const pre = pid && (isPast || isCurrent) ? core.pregame(pid, week) : null;
         return {
           slot, id: pid, name: pid ? core.players[pid]?.name ?? pid : null, pos: pid ? core.players[pid]?.pos ?? null : null, team: pid ? core.players[pid]?.team ?? null : null,
           points: pid && (isPast || isCurrent) ? r2(m.playersPoints[pid] ?? 0) : null,
+          /** Forecast before kickoff (past and current weeks). */
+          pregame: pre === null ? null : r1(pre),
+          /** This week: the pregame outcome (if active) and chance to play, for live updates in the browser. */
+          dist: pid && isCurrent ? pregameDist(core.currentPregame.get(pid)) : null,
           forecast: forecastView(f),
         };
       });
+      const pregame = isPast || isCurrent ? lineup.reduce((a, l) => a + (l.pregame ?? 0), 0) : null;
       const current = forecasts && !isPast ? lineupStats(core.slots, starters, forecasts) : null;
       const best = !isPast ? core.bestByWeek.get(`${m.rosterId}:${week}`) ?? null : null;
       return {
         rosterId: m.rosterId, points: r2(m.customPoints ?? m.points), lineup,
-        projected: current ? r1(current.expected) : null, optimal: best ? r1(best.expected) : null,
+        projected: current ? r1(current.expected) : null, optimal: best ? r1(best.expected) : null, pregame: pregame === null ? null : r1(pregame),
         bench: isPast ? m.players.filter(pid => !m.starters.includes(pid)).map(pid => ({ id: pid, name: core.players[pid]?.name ?? pid, pos: core.players[pid]?.pos ?? '', points: r2(m.playersPoints[pid] ?? 0) })).sort((x, y) => y.points - x.points).slice(0, 8) : [],
       };
     };
@@ -650,8 +662,9 @@ function playerPage(core: LeagueCore, playerId: string, p: LeagueCore['players']
       const snaps = idp ? st.def_snp : st.off_snp, teamSnaps = idp ? st.tm_def_snp : st.tm_off_snp;
       const full = completeStats(st, p.pos);
       const cats = categoryPoints(full, scoring);
+      const proj = core.pregame(playerId, week, season);
       return [{
-        season, week, opp: line.opponent, pts: r2(scoreStats(full, scoring)), snapShare: snaps && teamSnaps ? pct(snaps / teamSnaps) : null,
+        season, week, opp: line.opponent, pts: r2(scoreStats(full, scoring)), proj: proj === null ? null : r1(proj), snapShare: snaps && teamSnaps ? pct(snaps / teamSnaps) : null,
         categories: Object.fromEntries(Object.entries(cats).map(([k, v]) => [k, r2(v ?? 0)])),
         stats: Object.fromEntries(scoreBreakdown(full, scoring).map(b => [b.key, b.stat])),
       }];
@@ -663,6 +676,8 @@ function playerPage(core: LeagueCore, playerId: string, p: LeagueCore['players']
   const quantiles = current ? Array.from({ length: 21 }, (_, i) => r1(current.mean + current.residuals[i])) : null;
   return {
     player: playerRow(core, playerId),
+    /** This week's forecast as it stood at kickoff, once the game is under way. */
+    pregame: core.week !== null && core.isLocked(playerId) ? (v => (v === null ? null : r1(v)))(core.pregame(playerId, core.week)) : null,
     details: { college: p.college, birthDate: p.birthDate, depthOrder: p.depthOrder, injuryNotes: p.injuryNotes, status: p.status },
     gameLog: [...log(core.statsByWeek as never, core.season), ...log(core.prevStatsByWeek as never, core.season - 1)].sort((a, b) => b.season - a.season || b.week - a.week),
     projection: projStats ? { breakdown: scoreBreakdown(projStats, scoring).map(b => ({ ...b, stat: r2(b.stat), points: r2(b.points) })), total: r2(scoreStats(projStats, scoring)) } : null,
@@ -675,65 +690,53 @@ function playerPage(core: LeagueCore, playerId: string, p: LeagueCore['players']
   };
 }
 
-export async function trade(id: string, body: { a: number; b: number; aGives: string[]; bGives: string[] }) {
+export async function trade(id: string, body: TradeRequest) {
   const core = await getCore(id);
-  const ta = core.teams.find(t => t.rosterId === body.a), tb = core.teams.find(t => t.rosterId === body.b);
-  if (!ta || !tb || ta === tb) throw new HttpError(400, 'Pick two different teams');
-  const valid = (ids: unknown, owner: typeof ta) => Array.isArray(ids) && ids.every(x => typeof x === 'string' && owner.roster.players.includes(x));
-  if (!valid(body.aGives, ta) || !valid(body.bGives, tb)) throw new HttpError(400, 'Every traded player must be on the giving roster');
-  if (!body.aGives.length && !body.bGives.length) throw new HttpError(400, 'Add at least one player');
-  const weeks = core.horizon.length ? core.horizon : [];
-  const value = (pid: string) => ({ value: core.values.get(pid)?.value ?? 0, dynasty: core.values.get(pid)?.dynasty ?? 0 });
-  const active = (t: typeof ta) => t.roster.players.filter(pid => !core.taxiOrIr.has(pid));
-  const sideA = analyzeTradeSide({ rosterId: ta.rosterId, roster: active(ta), gives: body.aGives, gets: body.bGives, slots: core.slots, players: core.players, forecasts: core.forecasts, weeks, value });
-  const sideB = analyzeTradeSide({ rosterId: tb.rosterId, roster: active(tb), gives: body.bGives, gets: body.aGives, slots: core.slots, players: core.players, forecasts: core.forecasts, weeks, value });
+  let result: ReturnType<typeof evaluateTrade>;
+  try {
+    result = evaluateTrade(tradeKitOf(core), body);
+  } catch (error) {
+    if (error instanceof TradeError) throw new HttpError(400, error.message);
+    throw error;
+  }
+  const rows = (ids: string[]) => ids.map(pid => listRow(core, pid));
+  return { ...result, a: { ...result.a, gives: rows(result.a.gives), gets: rows(result.a.gets) }, b: { ...result.b, gives: rows(result.b.gives), gets: rows(result.b.gets) } };
+}
 
-  // Playoff odds before/after: rerun the season with both teams' post-trade weekly lineups.
-  const before = seasonSim(core);
-  const after = (() => {
+/** What the Trade lab needs to evaluate any trade in the browser (static deployments). */
+export async function tradeKit(id: string) {
+  return tradeKitOf(await getCore(id));
+}
+
+function tradeKitOf(core: LeagueCore): TradeKit {
+  return once(core, 'tradeKit', () => {
+    const weeks = core.horizon;
     const shape = playoffShape(core.league);
-    const override = new Map<string, TeamWeekDist>();
-    for (const [side, t] of [[sideA, ta], [sideB, tb]] as const) {
-      const ids = [...active(t).filter(pid => !side.gives.includes(pid)), ...side.gets];
-      for (const w of weeks) {
-        const l = bestLineup(core.slots, ids, core.players, core.forecasts.get(w)!);
-        override.set(`${t.rosterId}:${w}`, lineupDist(l, managerFactor(core, t.rosterId)));
-      }
+    const active = (t: LeagueCore['teams'][number]) => t.roster.players.filter(pid => !core.taxiOrIr.has(pid));
+    const players: TradeKit['players'] = {};
+    for (const t of core.teams) for (const pid of t.roster.players) {
+      const p = core.players[pid];
+      if (!p) continue;
+      players[pid] = {
+        eligible: p.eligible, name: p.name, value: core.values.get(pid)?.value ?? 0, dynasty: core.values.get(pid)?.dynasty ?? 0,
+        weeks: weeks.map(w => {
+          const f = core.forecasts.get(w)?.get(pid);
+          return f ? [f.expected, variance(outcomeOf(f))] : null;
+        }),
+      };
     }
-    const remaining: { week: number; a: number; b: number }[] = [];
-    for (const w of weeks.filter(x => x <= core.lastRegularWeek)) {
-      const byMatch = new Map<number, number[]>();
-      for (const m of core.schedule.get(w) ?? []) if (m.matchupId !== null) byMatch.set(m.matchupId, [...(byMatch.get(m.matchupId) ?? []), m.rosterId]);
-      for (const pair of byMatch.values()) if (pair.length === 2) remaining.push({ week: w, a: pair[0], b: pair[1] });
-    }
-    return simulateSeason({
-      teams: core.teams.map(t => t.rosterId),
-      record: new Map(core.teams.map(t => [t.rosterId, { wins: t.roster.wins, losses: t.roster.losses, ties: t.roster.ties, pointsFor: t.roster.pointsFor }])),
-      remaining,
-      dist: (rid, w) => override.get(`${rid}:${w}`) ?? teamDist(core, rid, w),
-      playoffTeams: core.league.playoffTeams, playoffStart: core.league.playoffWeekStart, roundWeeks: shape.roundWeeks, finalWeeks: shape.finalWeeks,
-      leverageWeek: core.week ?? 0, seed: `${core.id}:${core.week}`, sims: SEASON_SIMS,
-    });
-  })();
-  const odds = (sim: typeof before, rid: number) => {
-    const o = sim.teams.find(x => x.rosterId === rid)!;
-    return { playoffPct: pct(o.playoffPct), champPct: pct(o.champPct) };
-  };
-  const view = (s: typeof sideA) => ({
-    rosterId: s.rosterId,
-    gives: s.gives.map(pid => playerRow(core, pid)), gets: s.gets.map(pid => playerRow(core, pid)),
-    rosBefore: r1(s.before.total), rosAfter: r1(s.after.total), rosDelta: r1(s.rosDelta), perWeekDelta: r2(s.perWeekDelta),
-    byWeek: s.before.byWeek.map((b, i) => ({ week: b.week, before: r1(b.points), after: r1(s.after.byWeek[i].points) })),
-    valueOut: r1(s.valueOut), valueIn: r1(s.valueIn), dynastyOut: r1(s.dynastyOut), dynastyIn: r1(s.dynastyIn),
-    newStarters: s.newStarters.map(pid => core.players[pid]?.name ?? pid), lostStarters: s.lostStarters.map(pid => core.players[pid]?.name ?? pid),
-    oddsBefore: odds(before, s.rosterId), oddsAfter: odds(after, s.rosterId),
-    rosterSizeAfter: active(s.rosterId === ta.rosterId ? ta : tb).length - s.gives.length + s.gets.length,
+    const dists: TradeKit['dists'] = {};
+    for (const t of core.teams) for (const w of weeks) { const d = teamDist(core, t.rosterId, w); dists[`${t.rosterId}:${w}`] = [d.mean, d.sd]; }
+    const sim = seasonSim(core);
+    return {
+      weeks, slots: core.slots, lastRegularWeek: core.lastRegularWeek,
+      season: { playoffTeams: core.league.playoffTeams, playoffStart: core.league.playoffWeekStart, roundWeeks: shape.roundWeeks, finalWeeks: shape.finalWeeks, leverageWeek: core.week ?? 0, seed: `${core.id}:${core.week}`, sims: SEASON_SIMS },
+      teams: core.teams.map(t => ({ rosterId: t.rosterId, roster: t.roster.players, active: active(t), record: { wins: t.roster.wins, losses: t.roster.losses, ties: t.roster.ties, pointsFor: t.roster.pointsFor }, factor: managerFactor(core, t.rosterId) })),
+      remaining: remainingGames(core),
+      dists, players,
+      before: Object.fromEntries(sim.teams.map(o => [String(o.rosterId), { playoffPct: pct(o.playoffPct), champPct: pct(o.champPct) }])),
+    };
   });
-  const A = view(sideA), B = view(sideB);
-  const edge = (x: typeof A) => x.rosDelta / Math.max(1, weeks.length) + 0.08 * (x.dynastyIn - x.dynastyOut);
-  const ea = edge(A), eb = edge(B);
-  const verdict = Math.abs(ea - eb) < 1.2 ? 'fair' : ea > eb ? 'a' : 'b';
-  return { weeks, a: A, b: B, verdict, note: 'Now = expected points from each team’s best legal lineup, every remaining week. Dynasty = four-season value on the age curve.' };
 }
 
 export async function recap(id: string) {

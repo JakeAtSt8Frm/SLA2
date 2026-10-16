@@ -27,7 +27,7 @@ export default function ModelLab() {
         eyebrow={`Model ${r.meta.version} · trained ${new Date(r.meta.trainedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} on ${trainedFor} scoring`}
         title="Model lab"
       />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card><Stat label="Error vs Sleeper projection (2025)" value={`${improvement >= 0 ? '−' : '+'}${fmt(Math.abs(improvement) * 100, 1)}%`} sub={`MAE ${fmt(h.model.mae, 2)} vs ${fmt(h.provider.mae, 2)} pts · 95% CI of the gap ${fmt(r.maeDeltaCI2025[0], 2)} to ${fmt(r.maeDeltaCI2025[1], 2)}`} tone={r.maeDeltaCI2025[1] < 0 ? 'good' : undefined} /></Card>
         <Card><Stat label="Close start/sit calls ordered right" value={pct(h.model.closePairAcc, 1)} sub={`Sleeper ${pct(h.provider.closePairAcc, 1)} · same-position pairs within 3 pts`} /></Card>
         {bt && <Card><Stat label="Lineups on your league’s 2025 rosters" value={`${signed(bt.modelMinusProvider, 1)} / wk`} sub={`vs Sleeper-projection lineups · 95% CI ${bt.modelMinusProviderCI ? `${fmt(bt.modelMinusProviderCI[0], 1)} to ${fmt(bt.modelMinusProviderCI[1], 1)}` : '—'} · better in ${bt.modelBeatProvider} of ${bt.modelBeatProvider + bt.providerBeatModel} decided team-weeks`} tone={bt.modelMinusProviderCI && bt.modelMinusProviderCI[0] > 0 ? 'good' : undefined} /></Card>}
@@ -39,7 +39,7 @@ export default function ModelLab() {
         <GroupedBars categories={POS} series={SERIES.map(s => ({ ...s, values: POS.map(p => h[s.key].byPos[p]?.mae ?? 0) }))} format={v => `${fmt(v, 2)} pts`} yLabel="Mean absolute error by position" />
       </Card>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <MetricTable title="2025 holdout (never seen in training)" m={r.holdout2025} />
         {r.live2026 ? <MetricTable title="2026 so far (model trained through 2025)" m={r.live2026} note={r.live2026Weeks && r.live2026Weeks.length >= 6 ? undefined : `Only ${r.live2026Weeks?.length ?? 'a few'} weeks. Treat as a smoke test, not evidence.`} /> : <Card><Empty title="No 2026 weeks scored yet" /></Card>}
       </div>
@@ -47,7 +47,7 @@ export default function ModelLab() {
       {bt && (
         <Card>
           <CardHeader title={`Lineup backtest on ${trainedFor} 2025`} subtitle={`${bt.teamWeeks} team-weeks, all scored with this season’s rules${boot.league.positions.includes('DEF') ? ' · kickers included, team defenses not' : ''}`} />
-          <div className="grid gap-5 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <div className="space-y-3">
               {([['Hindsight-perfect lineup', bt.perTeamWeek.optimal, 1], ['SLA model', bt.perTeamWeek.model, bt.captureRate.model], ['Sleeper projection', bt.perTeamWeek.provider, bt.captureRate.provider], ['What managers started', bt.perTeamWeek.manager, bt.captureRate.manager]] as const).map(([label, pts, cap]) => (
                 <div key={label}>
@@ -60,7 +60,7 @@ export default function ModelLab() {
         </Card>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader title="What the model leans on" subtitle="Share of total split gain in the gradient-boosted trees" />
           <HBars rows={r.importance.slice(0, 12).map(f => ({ key: f.feature, label: FEATURE_LABELS[f.feature] ?? f.feature, value: f.share * 100 }))} format={v => `${fmt(v, 1)}%`} />
@@ -136,10 +136,12 @@ function Tracking() {
     <Card>
       <CardHeader title="Live track record" />
       {q.data && q.data.weeks.length ? (
+        <div className="-mx-4 overflow-x-auto scroll-thin sm:-mx-5">
         <table className="tbl num text-[13px]">
           <thead><tr><th>Week</th><th className="r">Players</th><th className="r">SLA MAE</th><th className="r">Sleeper MAE</th><th className="r">Bias</th><th className="r">Pair accuracy</th></tr></thead>
           <tbody>{q.data.weeks.map(w => <tr key={w.week}><td>Week {w.week}</td><td className="r">{w.players}</td><td className={cx('r font-semibold', w.maeModel < w.maeProvider && 'text-good-ink')}>{fmt(w.maeModel, 2)}</td><td className="r">{fmt(w.maeProvider, 2)}</td><td className="r text-ink-2">{fmt(w.biasModel, 2)}</td><td className="r">{w.pairAcc === null ? '—' : pct(w.pairAcc, 1)}</td></tr>)}</tbody>
         </table>
+        </div>
       ) : <Empty title="Collecting">Appears after the first week with saved forecasts is final.</Empty>}
     </Card>
   );

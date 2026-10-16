@@ -12,13 +12,14 @@ import {
 import { sourceFor, type LeagueExtras, type Platform } from './source.ts';
 import { defenseRows, fitDefenseModel, type DefenseModel } from '../engine/dst.ts';
 import { FeatureState } from '../engine/features.ts';
-import { pregameForecast, withLiveState, type ForecastEnv, type WeekForecast } from '../engine/forecast.ts';
+import { pregameForecast, replayForecast, withLiveState, type ForecastEnv, type PregamePoint, type WeekForecast } from '../engine/forecast.ts';
 import { adviseLineup, bestLineup, startable, type LineupAdvice, type TeamLineup } from '../engine/lineup.ts';
 import { ProjectionModel, type ModelFile } from '../engine/model.ts';
 import { starterSlots } from '../engine/positions.ts';
 import { buildTeamWeeks, summarizeSeason, type SeasonSummary, type TeamWeek } from '../engine/recap.ts';
 import { compileScoring, didPlay, hasForecast } from '../engine/scoring.ts';
 import { computeValues, type PlayerValue } from '../engine/values.ts';
+import { readSnapshots } from './snapshots.ts';
 import type { NflGame, PlayerInfo, Stats } from '../engine/types.ts';
 
 export const MODEL_DIR = path.resolve(import.meta.dirname, '..', 'model');
@@ -95,6 +96,14 @@ export interface LeagueCore {
   games: NflGame[];
   gameFor: (team: string, week: number) => NflGame | undefined;
   isLocked: (id: string) => boolean;
+  /**
+   * What the model forecast before kickoff (expected points): saved at kickoff when this server
+   * was running (data/snapshots), otherwise replayed from the games before that week. Later
+   * weeks get the current forecast. `season` defaults to the league's season (last season: replay only).
+   */
+  pregame: (id: string, week: number, season?: number) => number | null;
+  /** The current week's forecasts as they stand before the live overlay. */
+  currentPregame: ReadonlyMap<string, WeekForecast>;
   generatedAt: string;
   warnings: string[];
 }
@@ -138,6 +147,7 @@ interface Inputs {
   rosters: SleeperRoster[];
   players: Record<string, PlayerInfo>;
   games: NflGame[];
+  allGames: NflGame[];
   week: number | null;
   lastScored: number;
   lastRegular: number;
@@ -212,14 +222,17 @@ async function loadInputs(id: string): Promise<Inputs> {
   ].join('|');
 
   return {
-    platform: src.platform, extras, state, league, users, rosters, players, games, week, lastScored, lastRegular, last, horizon, seasonOver, pastWeeks, prevWeeks,
+    platform: src.platform, extras, state, league, users, rosters, players, games, allGames, week, lastScored, lastRegular, last, horizon, seasonOver, pastWeeks, prevWeeks,
     prevStats, prevProj, curStats, curProj, futureProj, liveStats, schedule, trending, liveSchedule, transactions, warnings, fingerprint,
     gamesTag: tagOf(allGames), pastSignatures,
   };
 }
 
-/** Everything learned from completed games: the feature state and the D/ST residual model. */
-interface History { key: string; state: FeatureState; defense: DefenseModel | null }
+/**
+ * Everything learned from completed games: the feature state, the D/ST residual model and each
+ * completed week's replayed pregame forecast (keyed `${season}:${week}`).
+ */
+interface History { key: string; state: FeatureState; defense: DefenseModel | null; pregame: Map<string, Map<string, PregamePoint>> }
 const histories = new Map<string, History>();
 
 interface PregameMemo { context: string; weeks: Map<number, Map<string, { key: string; forecast: WeekForecast }>> }
@@ -230,11 +243,13 @@ const pregameMemo = new Map<string, PregameMemo>();
  * correction, a newly final week or a new player catalogue changes it, so it is kept between
  * rebuilds. (Last season's weeks are immutable, cached-forever objects: identity is enough.)
  */
-async function historyFor(id: string, input: Inputs, scoring: [string, number][], hasDefense: boolean): Promise<History> {
+async function historyFor(id: string, input: Inputs, scoring: [string, number][], slots: string[]): Promise<History> {
   const { league, prevWeeks, pastWeeks, prevStats, prevProj, curStats, curProj, extras } = input;
   const season = league.season;
+  const hasDefense = slots.includes('DEF');
+  const { model, key: modelKeyUsed } = modelFor(id);
   const key = [
-    season, hasDefense, tagOf(input.players), JSON.stringify(scoring), input.pastSignatures,
+    season, slots.join(','), modelKeyUsed, input.gamesTag, tagOf(input.players), JSON.stringify(scoring), input.pastSignatures,
     prevStats.map(tagOf).join(','), prevProj.map(tagOf).join(','),
     JSON.stringify(Object.values(extras.players).map(p => [p.id, p.pos, p.birthDate, p.yearsExp])),
   ].join('|');
@@ -247,13 +262,42 @@ async function historyFor(id: string, input: Inputs, scoring: [string, number][]
   };
   const projStatsMap = (lines: WeekLine[]) => new Map(lines.filter(l => hasForecast(l.stats)).map(l => [l.id, l.stats]));
   const state = new FeatureState(scoring, meta);
+  const players: Record<string, PlayerInfo> = { ...input.players, ...extras.players };
+  const gameIndex = new Map<string, NflGame>();
+  for (const g of input.allGames) if (g.season >= season - 1) { gameIndex.set(`${g.season}:${g.week}:${g.home}`, g); gameIndex.set(`${g.season}:${g.week}:${g.away}`, g); }
+  const pregame = new Map<string, Map<string, PregamePoint>>();
+  // Before each completed week goes in, forecast it from the games before it: the pregame record.
+  const replay = (s: number, w: number, stats: WeekLine[], proj: WeekLine[]) => {
+    state.clearAverages();
+    const byId = new Map<string, WeekLine>(proj.filter(l => hasForecast(l.stats)).map(l => [l.id, l]));
+    const env: ForecastEnv = {
+      model, state, season: s, currentWeek: w, players, scoring, gameFor: (team, wk) => gameIndex.get(`${s}:${wk}:${team}`),
+      projections: wk => (wk === w ? byId : undefined), defense: null, now: 0,
+    };
+    const teamOf = new Map<string, string | null>();
+    for (const l of stats) if (didPlay(l.stats)) teamOf.set(l.id, l.team);
+    for (const l of byId.values()) teamOf.set(l.id, l.team ?? teamOf.get(l.id) ?? null);
+    const out = new Map<string, PregamePoint>();
+    for (const [pid, team] of teamOf) {
+      const p = players[pid];
+      if (!p || !startable(slots, p) || (p.pos === 'DEF' && !hasDefense)) continue;
+      const f = replayForecast(env, pid, w, team);
+      if (f) out.set(pid, f);
+    }
+    pregame.set(`${s}:${w}`, out);
+  };
   state.startSeason(season - 1);
   for (let i = 0; i < prevWeeks.length; i++) {
+    replay(season - 1, prevWeeks[i], prevStats[i], prevProj[i]);
     state.ingestWeek(season - 1, prevWeeks[i], prevStats[i], projStatsMap(prevProj[i]));
-    if (i % 3 === 2) await tick();
+    await tick();
   }
   state.startSeason(season);
-  for (let i = 0; i < pastWeeks.length; i++) state.ingestWeek(season, pastWeeks[i], curStats[i], projStatsMap(curProj[i]));
+  for (let i = 0; i < pastWeeks.length; i++) {
+    replay(season, pastWeeks[i], curStats[i], curProj[i]);
+    state.ingestWeek(season, pastWeeks[i], curStats[i], projStatsMap(curProj[i]));
+    await tick();
+  }
   state.clearAverages();
   await tick();
   // Team defenses: residual spread from every D/ST game on record (last season plus this one so far).
@@ -261,7 +305,7 @@ async function historyFor(id: string, input: Inputs, scoring: [string, number][]
     [...prevWeeks.map((_, i) => ({ stats: prevStats[i], projections: projStatsMap(prevProj[i]) })), ...pastWeeks.map((_, i) => ({ stats: curStats[i], projections: projStatsMap(curProj[i]) }))],
     pid => input.players[pid]?.pos === 'DEF', scoring,
   )) : null;
-  const history = { key, state, defense };
+  const history = { key, state, defense, pregame };
   histories.set(id, history);
   return history;
 }
@@ -284,7 +328,8 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
 
   const toMap = (lines: WeekLine[]) => new Map(lines.map(l => [l.id, l]));
   const hasDefense = slots.includes('DEF');
-  const history = await historyFor(id, input, scoring, hasDefense);
+  const history = await historyFor(id, input, scoring, slots);
+  const snapshots = await readSnapshots(id, season, week === null ? pastWeeks : [...pastWeeks, week]);
 
   const projectionsByWeek = new Map<number, Map<string, WeekLine>>();
   horizon.forEach((w, i) => projectionsByWeek.set(w, toMap(futureProj[i])));
@@ -343,6 +388,8 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
   const reuse = previous?.context === memoContext ? previous.weeks : null;
   const memo: PregameMemo = { context: memoContext, weeks: new Map() };
   const forecasts = new Map<number, Map<string, WeekForecast>>();
+  /** This week's forecasts before the live overlay. */
+  let currentPre = new Map<string, WeekForecast>();
   let longHorizon = relevant;
   let computed = 0;
   for (let i = 0; i < horizon.length; i++) {
@@ -370,6 +417,7 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
       kept.set(pid, { key, forecast: pre });
       m.set(pid, w === week ? withLiveState(env, pre) : pre);
     }
+    if (w === week) currentPre = new Map([...kept].map(([pid, e]) => [pid, e.forecast]));
     memo.weeks.set(w, kept);
     forecasts.set(w, m);
   }
@@ -380,6 +428,14 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
     if (week === null) return true;
     const f = forecasts.get(week)?.get(pid);
     return !!f?.live && f.live.status !== 'pre_game';
+  };
+  const pregame = (pid: string, w: number, s = season): number | null => {
+    if (s !== season) return history.pregame.get(`${s}:${w}`)?.get(pid)?.exp ?? null;
+    const saved = snapshots.get(w)?.[pid]?.exp;
+    if (week !== null && w > week) return forecasts.get(w)?.get(pid)?.expected ?? null;
+    // The saved copy is frozen at kickoff; before kickoff the current forecast is the pregame one.
+    if (w === week) return isLocked(pid) && saved !== undefined ? saved : currentPre.get(pid)?.expected ?? saved ?? null;
+    return saved ?? history.pregame.get(`${s}:${w}`)?.get(pid)?.exp ?? null;
   };
 
   const teams: TeamInfo[] = rosters.map(r => {
@@ -419,7 +475,7 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
     league, users, teams, season, week, lastScored, lastRegularWeek: lastRegular, lastWeek: last, horizon, slots, players, relevant,
     forecasts, env, ownerOf, taxiOrIr, schedule: new Map(schedule.map((m, i) => [i + 1, m])), results, summaries, values, advice, bestByWeek,
     transactions: input.transactions, trending: new Map(input.trending.map(t => [t.id, t.count])), statsByWeek, prevStatsByWeek, projectionsByWeek,
-    games, gameFor, isLocked, generatedAt: new Date(now).toISOString(), warnings,
+    games, gameFor, isLocked, pregame, currentPregame: currentPre, generatedAt: new Date(now).toISOString(), warnings,
   };
 }
 

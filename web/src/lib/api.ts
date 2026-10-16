@@ -1,6 +1,7 @@
 import { useMutation, useQuery, type QueryClient } from '@tanstack/react-query';
 // Type-only: the server's view functions define the API contract end to end.
 import type * as V from '../../../server/views.ts';
+import { evaluateTrade, TradeError, type TradeKit, type TradeRequest } from '../../../engine/trade.ts';
 
 export type Bootstrap = Awaited<ReturnType<typeof V.bootstrap>>;
 export type Overview = Awaited<ReturnType<typeof V.overview>>;
@@ -34,16 +35,63 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Static deployment (GitHub Pages): a scheduled job prebuilds every view as a JSON file next to
+ * the app (scripts/build-static.ts), so pages load from the CDN with no server to wake up.
+ */
+export const STATIC = import.meta.env.VITE_STATIC === '1';
+const DATA = `${import.meta.env.BASE_URL}data`;
+/** Build stamp of each league's files: a new build changes every URL, so nothing stale is reused. */
+const builds = new Map<string, string>();
+
+/** The prebuilt file behind an API route, or null for routes that need a live server. */
+export function staticUrl(url: string): string | null {
+  const u = new URL(url, 'http://local');
+  const parts = u.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean);
+  if (parts[0] === 'model' && parts.length === 1) return `${DATA}/model.json`;
+  if (parts[0] !== 'leagues') return null;
+  if (parts.length === 1) return `${DATA}/leagues.json`;
+  const [, id, view, a, b] = parts;
+  const dir = `${DATA}/${encodeURIComponent(id)}`;
+  // Bootstrap says which build is current, so it is never served from a cache older than a minute.
+  if (view === 'bootstrap') return `${dir}/bootstrap.json?t=${Math.floor(Date.now() / 60_000)}`;
+  const v = `?v=${encodeURIComponent(builds.get(id) ?? '')}`;
+  const week = u.searchParams.get('week'), season = u.searchParams.get('season');
+  if (view === 'matchups') return `${dir}/matchups${week ? `-${week}` : ''}.json${v}`;
+  if (view === 'defense') return `${dir}/defense${season ? `-${season}` : ''}.json${v}`;
+  if (view === 'teams' && a) return `${dir}/${b ? `${b}-${a}` : `team-${a}`}.json${v}`;
+  if (view === 'players' && a) return `${dir}/players/${encodeURIComponent(a)}.json${v}`;
+  if (view && !a) return `${dir}/${view}.json${v}`;
+  return null;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response;
+  const target = STATIC ? staticUrl(url) : url;
+  if (target === null) throw new ApiError(404, 'Not available in this version of the app.');
   try {
-    response = await fetch(url, init);
+    response = await fetch(target, STATIC ? { cache: 'no-cache' } : init);
   } catch {
-    throw new ApiError(0, 'Can’t reach the SLA server. Is it running?');
+    throw new ApiError(0, STATIC ? 'Can’t reach the app’s data. Check your connection.' : 'Can’t reach the SLA server. Is it running?');
   }
-  const body = await response.json().catch(() => null) as { error?: string } | null;
-  if (!response.ok) throw new ApiError(response.status, body?.error ?? `Request failed (${response.status})`);
+  const body = await response.json().catch(() => null) as { error?: string; generatedAt?: string; league?: { id?: string } } | null;
+  if (!response.ok) throw new ApiError(response.status, body?.error ?? (STATIC && response.status === 404 ? 'Not available yet. It appears after the next data refresh.' : `Request failed (${response.status})`));
+  if (STATIC && body?.generatedAt && body.league?.id) builds.set(body.league.id, body.generatedAt);
   return body as T;
+}
+
+/** Trades are evaluated in the browser from the league's trade kit when there is no server. */
+async function tradeLocally(id: string, body: TradeRequest): Promise<Trade> {
+  const [kit, list] = await Promise.all([request<TradeKit>(`${base(id)}/trade-kit`), request<Players>(`${base(id)}/players`)]);
+  const rows = new Map(list.players.map(p => [p.id, p]));
+  try {
+    const r = evaluateTrade(kit, body);
+    const side = (s: typeof r.a) => ({ ...s, gives: s.gives.map(pid => rows.get(pid)!).filter(Boolean), gets: s.gets.map(pid => rows.get(pid)!).filter(Boolean) });
+    return { ...r, a: side(r.a), b: side(r.b) };
+  } catch (error) {
+    if (error instanceof TradeError) throw new ApiError(400, error.message);
+    throw error;
+  }
 }
 
 const base = (id: string) => `/api/leagues/${id}`;
@@ -88,7 +136,9 @@ export const useModel = (id: string) => useQuery({ queryKey: ['model', id], quer
 export type ConfiguredLeague = Awaited<ReturnType<typeof V.configuredLeagues>>[number];
 export const useLeagues = () => useQuery({ queryKey: ['leagues'], queryFn: () => request<ConfiguredLeague[]>('/api/leagues'), staleTime: 30 * MIN });
 export const useTracking = (id: string) => useQuery({ queryKey: ['tracking', id], queryFn: () => request<Tracking>(`${base(id)}/tracking`), staleTime: 10 * MIN });
-export const useTrade = (id: string) => useMutation({ mutationFn: (body: { a: number; b: number; aGives: string[]; bGives: string[] }) => request<Trade>(`${base(id)}/trade`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });
+export const useTrade = (id: string) => useMutation({
+  mutationFn: (body: TradeRequest) => (STATIC ? tradeLocally(id, body) : request<Trade>(`${base(id)}/trade`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
+});
 export const searchLeagues = (username: string) => request<LeagueSearchResult>(`/api/users/${encodeURIComponent(username)}/leagues`);
 
 export interface Metrics { n: number; mae: number; rmse: number; bias: number; spearman: number; pairAcc: number; pairs: number; closePairAcc: number; closePairs: number; byPos: Record<string, { mae: number; n: number; bias: number; pairAcc: number }> }

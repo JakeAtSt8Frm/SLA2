@@ -104,8 +104,8 @@ export function ScoreDistribution({ hist, a, b, nameA, nameB }: {
     ));
   };
   return (
-    <div ref={ref} className="w-full">
-      <svg width={width} height={H} role="img" aria-label={`Simulated score distributions for ${nameA} and ${nameB}`}>
+    <div ref={ref} className="w-full min-w-0">
+      <svg className="block max-w-full" width={width} height={H} role="img" aria-label={`Simulated score distributions for ${nameA} and ${nameB}`}>
         <line x1={pad.l} x2={width - pad.r} y1={y(0)} y2={y(0)} stroke="var(--axis)" strokeWidth={1} />
         {ticks.map(t => (
           <g key={t}>
@@ -233,8 +233,8 @@ export function TrendChart({ series, labels, highlight, height = 220, yLabel, in
     return lastIdx >= 0 ? { s, i: lastIdx, v: s.values[lastIdx]! } : null;
   }).filter((e): e is { s: LineSeries; i: number; v: number } => !!e);
   return (
-    <div ref={ref} className="w-full">
-      <svg width={width} height={height} role="img" aria-label={yLabel ?? 'Trend chart'}>
+    <div ref={ref} className="w-full min-w-0">
+      <svg className="block max-w-full" width={width} height={height} role="img" aria-label={yLabel ?? 'Trend chart'}>
         {ticks.map(t => (
           <g key={t}>
             <line x1={pad.l} x2={width - pad.r} y1={y(t)} y2={y(t)} stroke="var(--grid)" strokeWidth={1} />
@@ -282,8 +282,8 @@ export function GroupedBars({ categories, series, height = 220, format = (v: num
     return `M${x0},${base}V${top + r}Q${x0},${top} ${x0 + r},${top}H${x0 + barW - r}Q${x0 + barW},${top} ${x0 + barW},${top + r}V${base}Z`;
   };
   return (
-    <div ref={ref} className="w-full">
-      <svg width={width} height={height} role="img" aria-label={yLabel ?? 'Grouped bar chart'}>
+    <div ref={ref} className="w-full min-w-0">
+      <svg className="block max-w-full" width={width} height={height} role="img" aria-label={yLabel ?? 'Grouped bar chart'}>
         {ticks.map(t => (
           <g key={t}>
             <line x1={pad.l} x2={width - pad.r} y1={y(t)} y2={y(t)} stroke={t === 0 ? 'var(--axis)' : 'var(--grid)'} strokeWidth={1} />
@@ -332,8 +332,8 @@ export function WeekColumns({ weeks, color, reference, height = 150, marks }: {
   const y = (v: number) => pad.t + (1 - v / top) * (height - pad.t - pad.b);
   const base = y(0);
   return (
-    <div ref={ref} className="w-full">
-      <svg width={width} height={height} role="img" aria-label="Points by week">
+    <div ref={ref} className="w-full min-w-0">
+      <svg className="block max-w-full" width={width} height={height} role="img" aria-label="Points by week">
         {ticks.map(t => (
           <g key={t}>
             <line x1={pad.l} x2={width - pad.r} y1={y(t)} y2={y(t)} stroke={t === 0 ? 'var(--axis)' : 'var(--grid)'} strokeWidth={1} />
@@ -369,7 +369,7 @@ export function HBars({ rows, color = 'var(--accent)', format = (v: number) => f
   return (
     <div className="space-y-1.5">
       {rows.map(r => (
-        <div key={r.key} className="grid grid-cols-[minmax(90px,38%)_1fr_auto] items-center gap-2 text-[13px]"
+        <div key={r.key} className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_auto] items-center gap-2 text-[13px] sm:grid-cols-[minmax(90px,38%)_1fr_auto]"
           onPointerMove={e => r.detail && tip.show(e, r.detail)} onPointerLeave={tip.hide}>
           <div className="truncate text-ink-2">{r.label}</div>
           <div className="h-3">

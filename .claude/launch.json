@@ -4,14 +4,35 @@
     {
       "name": "sla-web",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["node_modules/vite/bin/vite.js"],
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js"
+      ],
       "port": 5180
     },
     {
       "name": "sla-api",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["--watch-path=server", "--watch-path=engine", "--watch-path=model", "server/index.ts"],
+      "runtimeArgs": [
+        "--watch-path=server",
+        "--watch-path=engine",
+        "--watch-path=model",
+        "server/index.ts"
+      ],
       "port": 8787
+    },
+    {
+      "name": "sla-static",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "preview",
+        "--port",
+        "5181",
+        "--strictPort",
+        "--base",
+        "/SLA2/"
+      ],
+      "port": 5181
     }
   ]
 }

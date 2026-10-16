@@ -4,12 +4,12 @@ import { usePlayers } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { fmt, pct, posLabel } from '../lib/format.ts';
 import { Sparkline } from '../charts/charts.tsx';
-import { Button, Card, Delta, Empty, ErrorState, InfoTip, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Segmented, Select, TeamLink, useSort } from '../components/ui.tsx';
+import { Button, Card, Delta, Empty, ErrorState, InfoTip, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Segmented, Select, TeamDot, TeamLink, useSort } from '../components/ui.tsx';
 
 type Avail = 'all' | 'fa' | 'rostered' | 'mine';
 
 export default function PlayersPage() {
-  const { leagueId, myTeamId, boot } = useApp();
+  const { leagueId, myTeamId, boot, teamName } = useApp();
   const q = usePlayers(leagueId);
   const [text, setText] = useState('');
   const query = useDeferredValue(text.trim().toLowerCase());
@@ -45,7 +45,7 @@ export default function PlayersPage() {
             <table className="tbl num text-[13px]">
               <thead>
                 <tr>
-                  {header('name', 'Player')}
+                  {header('name', 'Player', 'sticky-col')}
                   <th>Owner</th>
                   {header('exp', `Wk ${boot.league.week ?? ''}`, 'r')}
                   {header('edge', <span className="inline-flex items-center gap-1">vs Sleeper <InfoTip>SLA expected points minus Sleeper’s projection rescored for this league. Positive = the model is higher.</InfoTip></span>, 'r')}
@@ -63,8 +63,8 @@ export default function PlayersPage() {
               <tbody>
                 {sorted.slice(0, limit).map(r => (
                   <tr key={r.id} className="row-hover">
-                    <td><span className="flex items-center gap-2"><Pos pos={r.pos} /><PlayerLink id={r.id} name={r.name} className="max-w-[170px]" /><span className="text-[11px] text-ink-3">{r.team ?? 'FA'}</span><Ranks ranks={r.ranks} /><Injury status={r.injury} /></span></td>
-                    <td className="max-w-[150px] text-[12px]">{r.owner !== null ? <TeamLink rosterId={r.owner} /> : <span className="text-ink-3">Free agent</span>}</td>
+                    <td className="sticky-col"><span className="flex items-center gap-2"><Pos pos={r.pos} /><PlayerLink id={r.id} name={r.name} className="max-w-[130px] sm:max-w-[170px]" /><span className="text-[11px] text-ink-3">{r.team ?? 'FA'}</span><span className="hidden items-center gap-1 sm:inline-flex"><Ranks ranks={r.ranks} /></span><Injury status={r.injury} /></span></td>
+                    <td className="max-w-[150px] text-[12px]">{r.owner !== null ? <><span className="sm:hidden" title={teamName(r.owner)}><TeamDot rosterId={r.owner} /></span><span className="hidden sm:inline"><TeamLink rosterId={r.owner} /></span></> : <span className="text-ink-3"><span className="sm:hidden">FA</span><span className="hidden sm:inline">Free agent</span></span>}</td>
                     <td className="r font-semibold">{r.week ? (r.week.bye ? 'BYE' : fmt(r.week.exp)) : '—'}</td>
                     <td className="r text-[12px]">{r.week && r.week.provider !== null && !r.week.bye ? <Delta value={r.week.exp - r.week.provider} /> : '—'}</td>
                     <td className="r">{fmt(r.value?.rosAvg)}</td>

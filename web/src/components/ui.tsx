@@ -219,7 +219,7 @@ export function PageSkeleton() {
   return (
     <div className="space-y-4" aria-busy="true" aria-label="Loading">
       <Skeleton className="h-9 w-64" />
-      <div className="grid gap-4 md:grid-cols-3">{[0, 1, 2].map(i => <Skeleton key={i} className="h-28" />)}</div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">{[0, 1, 2].map(i => <Skeleton key={i} className="h-28" />)}</div>
       <Skeleton className="h-72" />
     </div>
   );

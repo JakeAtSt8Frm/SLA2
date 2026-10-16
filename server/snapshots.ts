@@ -8,7 +8,8 @@ import path from 'node:path';
 import type { LeagueCore } from './league.ts';
 import { compileScoring, completeStats, didPlay, round, scoreStats } from '../engine/scoring.ts';
 
-const DIR = process.env.SLA_SNAPSHOT_DIR ?? path.resolve(import.meta.dirname, '..', 'data', 'snapshots');
+export const SNAPSHOT_DIR = process.env.SLA_SNAPSHOT_DIR ?? path.resolve(import.meta.dirname, '..', 'data', 'snapshots');
+const DIR = SNAPSHOT_DIR;
 const lastWrite = new Map<string, number>();
 
 interface Entry { exp: number; mean: number; play: number; provider: number | null; at: number; owner: number | null }
@@ -18,6 +19,16 @@ const fileFor = (leagueId: string, season: number, week: number) => path.join(DI
 
 async function read(file: string): Promise<Snapshot> {
   try { return JSON.parse(await readFile(file, 'utf8')) as Snapshot; } catch { return {}; }
+}
+
+/** Saved pregame forecasts for some weeks of a season (weeks without a file are left out). */
+export async function readSnapshots(leagueId: string, season: number, weeks: readonly number[]): Promise<Map<number, Readonly<Snapshot>>> {
+  const out = new Map<number, Snapshot>();
+  await Promise.all(weeks.map(async w => {
+    const snap = await read(fileFor(leagueId, season, w));
+    if (Object.keys(snap).length) out.set(w, snap);
+  }));
+  return out;
 }
 
 /** Record pregame forecasts for rostered players and anyone projected to matter. */

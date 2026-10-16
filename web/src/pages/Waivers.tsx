@@ -46,7 +46,7 @@ function Recommendations({ recs, faab }: { recs: Waivers['recommendations']; faa
       <CardHeader title="Top pickups for you" right={<InfoTip>{`Net gain = sum of weekly best-lineup improvements with the pickup over the rest of the season, after dropping the suggested player.${boot.league.isDynasty ? ' Drop suggestions weigh both lineup impact and dynasty value, so young upside players aren’t cut for a one-week rental.' : ''}`}</InfoTip>} />
       <div className="space-y-3">
         {recs.slice(0, shown).map((r, i) => (
-          <div key={r.id} className="grid gap-3 rounded-[12px] border border-line p-3.5 xl:grid-cols-[28px_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1.2fr)] xl:items-center">
+          <div key={r.id} className="grid grid-cols-1 gap-3 rounded-[12px] border border-line p-3.5 xl:grid-cols-[28px_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1.2fr)] xl:items-center">
             <div className="num text-[15px] font-semibold text-ink-3">{i + 1}</div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="text-[11px] font-semibold uppercase tracking-wide text-good-ink">Add</span><Pos pos={r.player.pos} /><PlayerLink id={r.id} name={r.player.name} /><span className="text-[12px] text-ink-3">{r.player.team}</span><Ranks ranks={r.player.ranks} /><Injury status={r.player.injury} /></div>
@@ -104,7 +104,7 @@ function FreeAgents({ rows, total }: { rows: Waivers['freeAgents']; total: numbe
           <table className="tbl num text-[13px]">
             <thead>
               <tr>
-                {header('name', 'Player')}
+                {header('name', 'Player', 'sticky-col')}
                 {header('gain', <span className="inline-flex items-center gap-1">For you <InfoTip>Rest-of-season points this player adds to your best lineup, after the best drop. Shown for your top 30 pickups.</InfoTip></span>, 'r')}
                 {header('exp', 'This week', 'r')}
                 {header('ros', 'ROS / wk', 'r')}
@@ -118,7 +118,7 @@ function FreeAgents({ rows, total }: { rows: Waivers['freeAgents']; total: numbe
             <tbody>
               {sorted.slice(0, limit).map(r => (
                 <tr key={r.id} className="row-hover">
-                  <td><span className="flex items-center gap-2"><Pos pos={r.pos} /><PlayerLink id={r.id} name={r.name} className="max-w-[180px]" /><span className="text-[11px] text-ink-3">{r.team}</span><Ranks ranks={r.ranks} /><Injury status={r.injury} /></span></td>
+                  <td className="sticky-col"><span className="flex items-center gap-2"><Pos pos={r.pos} /><PlayerLink id={r.id} name={r.name} className="max-w-[130px] sm:max-w-[180px]" /><span className="text-[11px] text-ink-3">{r.team}</span><span className="hidden items-center gap-1 sm:inline-flex"><Ranks ranks={r.ranks} /></span><Injury status={r.injury} /></span></td>
                   <td className={cx('r', r.gain ? 'font-semibold text-good-ink' : 'text-ink-3')}>{r.gain ? `+${fmt(r.gain)}` : '—'}</td>
                   <td className="r font-semibold">{r.week ? (r.week.bye ? 'BYE' : fmt(r.week.exp)) : '—'}</td>
                   <td className="r">{fmt(r.value?.rosAvg)}</td>

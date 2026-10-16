@@ -16,7 +16,7 @@ export default function HistoryPage() {
   return (
     <div className="space-y-5">
       <PageHeader title="League history" />
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {completed.length === 0 && <Card className="sm:col-span-2"><Empty title="No completed seasons yet" /></Card>}
         {completed.map(s => (
           <Card key={s.leagueId} className="p-4">
@@ -72,10 +72,10 @@ export default function HistoryPage() {
         </div>
       </Card>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader title="Record book" />
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <div className="eyebrow mb-1">Highest</div>
               {h.records.highScore.map((x, i) => <div key={i} className="flex justify-between gap-2 py-1 text-[13px]"><span className="truncate">{name(x.owner)} <span className="text-ink-3">’{String(x.season).slice(2)} W{x.week}</span></span><span className="num font-semibold">{fmt(x.points)}</span></div>)}
@@ -88,7 +88,7 @@ export default function HistoryPage() {
         </Card>
         <Card>
           <CardHeader title="Blowouts and nail-biters" />
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <div className="eyebrow mb-1">Biggest margins</div>
               {h.records.blowouts.map((x, i) => <div key={i} className="py-1 text-[13px]"><div className="flex justify-between gap-2"><span className="truncate font-medium">{name(x.winner)}</span><span className="num font-semibold">+{fmt(x.margin)}</span></div><div className="text-[11px] text-ink-3">over {name(x.loser)} · {x.score} · ’{String(x.season).slice(2)} W{x.week}</div></div>)}

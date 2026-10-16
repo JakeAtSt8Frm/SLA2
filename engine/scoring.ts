@@ -138,3 +138,16 @@ export function hasForecast(stats: Stats | undefined): boolean {
   }
   return false;
 }
+
+/** Drop provider-precomputed totals, ADP and rank fields: they are never this league's score. */
+export function cleanProviderStats(raw: unknown): Stats {
+  const out: Stats = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) continue;
+    if (key.startsWith('adp') || key.startsWith('pos_adp') || key.startsWith('pos_rank') || key.startsWith('rank_')) continue;
+    if (key.startsWith('pts_') && !key.startsWith('pts_allow')) continue;
+    out[key] = value;
+  }
+  return out;
+}

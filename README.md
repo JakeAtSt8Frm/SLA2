@@ -29,6 +29,13 @@ npm run build
 npm start            # http://localhost:8787
 ```
 
+Static build (what GitHub Pages serves; see [Deploying](#deploying)):
+
+```bash
+SLA_BASE=/SLA2/ npm run build:static   # app + every league's data as JSON files in dist/
+npm run preview:static -- --base /SLA2/  # http://localhost:5181/SLA2/
+```
+
 Requires Node 23.6+ (runs the TypeScript server directly; no compile step).
 
 Checks:
@@ -48,12 +55,12 @@ npm run verify:espn      # rescoring ESPN leagues from stat lines vs ESPN’s of
 | **League hub** | Your matchup and win odds, standings with all-play/luck, playoff and title odds, awards, last week, recent moves |
 | **Start / sit** | Best legal lineup across every slot (Hungarian assignment, kickoff locks respected), swap-by-swap confidence, win odds as set vs optimized |
 | **Waiver wire** | Every free agent tested in *your* roster: rest-of-season points added to your best lineup, net of the best drop (dynasty-aware in dynasty leagues), FAAB guidance or waiver priority, rival demand |
-| **Matchups** | 8,000-run player-level simulations, score distributions, side-by-side lineups, live scoring, past weeks |
+| **Matchups** | 8,000-run player-level simulations, score distributions, side-by-side lineups with each player's pre-game projection, live scoring, past weeks |
 | **Power rankings** | Composite of scoring, all-play, recent form and projected outlook, with trend and roster value; season power ranks points scored plus the projection for every remaining regular-season week |
 | **Playoff odds** | 12,000 simulated seasons: playoff/bye/title odds, finish distribution, this-week leverage, every remaining game |
 | **Roster & outlook** | Any team: positional strength vs league, schedule win odds, roster values, weekly scoring |
 | **Trade lab** | Re-optimizes both rosters every remaining week, re-simulates playoff odds, compares now vs dynasty value |
-| **Players** | 1,500+ players scored your way, model vs Sleeper edge, values; click any name for the full forecast, projection breakdown and game log |
+| **Players** | 1,500+ players scored your way, model vs Sleeper edge, values; click any name for the full forecast, projection breakdown and game log (pre-game projection vs result for every game) |
 | **Season wrapped / History** | Awards, luck, lineup efficiency, MVPs, weekly heatmap; champions, all-time records, head-to-head across seasons |
 | **Defense** | Points each defense allows to every position in league scoring (SLA 1.0’s matchup research), plus which offenses feed opposing D/STs |
 | **Model lab** | The league’s own model: holdout accuracy, lineup backtest, calibration, availability rates, live track record |
@@ -75,7 +82,13 @@ npm run verify:espn      # rescoring ESPN leagues from stat lines vs ESPN’s of
    keeps healthy availability, because a roster covers an injured starter from the bench.
 4. **Uncertainty**: floors, ceilings, boom/bust and every simulation use out-of-sample residual
    distributions by position and projection level (80% bands cover 76–81% of 2025 outcomes).
-5. **Season projections** (playoff odds, schedule, trade impact) scale each team's best lineup by how well
+5. **Pre-game projections.** Matchups and game logs show what the model expected before kickoff. From
+   week 3 of 2026 on, that is the forecast saved at kickoff (`data/snapshots/`, frozen once a game starts).
+   For earlier weeks, and for last season, it is replayed: the same model and features, fed only the games
+   before that week and that week's provider projection. The replay can't know that week's injury tag,
+   so it uses the no-tag availability rate, and the model was trained on those seasons, so replays read
+   slightly better than a true pregame forecast would.
+6. **Season projections** (playoff odds, schedule, trade impact) scale each team's best lineup by how well
    its manager actually sets lineups (share of hindsight-optimal points started, relative to the league,
    shrunk toward average with six weeks of prior). Managers in this league started 68–97% of their best
    lineup's value, and the rate carries over within a season.
@@ -101,6 +114,23 @@ Tried in September 2026 and not adopted, because none held up on 2025 and 2026 a
 weighting recent seasons more, season-to-date provider-bias features (league-wide by position, by team,
 by opponent), other tree settings, a per-position recalibration of the output, and a per-position strength
 for the model's correction. Elite DL remain under-predicted by about 1 point per game.
+
+Tried in October 2026, five weeks into the season (`research/window.py`). Protocol: train on earlier seasons
+plus the test season's weeks 1–5, score its weeks 6+ (tuned on 2024, reported on 2025). MAE on the
+start/sit cohort, Neighbas in Paris scoring (UK-BG and The O.J. gave the same verdicts):
+
+| Variant | 2024 wk 6+ | 2025 wk 6+ |
+|---|---|---|
+| **All seasons since 2020 + weeks 1–5** (what ships) | **6.174** | **6.252** |
+| Only the last two seasons + weeks 1–5 | 6.224 | 6.384 |
+| All seasons, weighted toward this season and the two before | 6.190 | 6.267 |
+| Player history from the two prior seasons, not one | 6.191 | 6.295 |
+| + recency-weighted career average, this-season snap share and gap to provider | 6.174 | 6.251 |
+| + red-zone looks, air yards, target share | 6.180 | 6.250 |
+| Correct weeks 6+ by the model's weeks 1–5 miss, per position | 6.179 | 6.254 |
+
+None beat the shipped model, so it stays: all seasons, refit on everything through the latest completed
+week. The weekly retrain workflow (below) keeps folding each new week in.
 
 ### ESPN leagues
 
@@ -150,6 +180,8 @@ web/        React 19 + TanStack Query + Tailwind v4, hand-built SVG charts
 research/   Data fetch, dataset build (same feature code as the server), training, backtests, review
 model/      model.json / model-<league>.json (exported trees + residual tables) and matching report files
 config/     espn.json: ESPN login cookies and league list (server-side only)
+scripts/    build-static.ts (every view as JSON for GitHub Pages), pull-snapshots.ts, smoke, bench, dev
+.github/    deploy.yml (scheduled Pages build), retrain.yml (weekly model refresh)
 tests/      Vitest suite incl. Sleeper and ESPN official-score parity fixtures
 ```
 
@@ -178,7 +210,41 @@ forecast level), rest-of-season averages, and team scores on the league's real r
 
 ## Deploying
 
-Any Node 23.6+ host works (Render, Railway, Fly.io, a VPS). A `Dockerfile` is included:
+**GitHub Pages (the default).** `.github/workflows/deploy.yml` runs the engine on a schedule, writes every
+view the app reads as a JSON file (`scripts/build-static.ts`, about 6 s and 36 MB for the three leagues),
+and publishes the app plus that data to GitHub Pages. Pages serve from a CDN, so there is no server to
+wake up and every page loads as fast as a static file. Schedule (UTC): every 10 minutes during Sunday
+games, every 15 during Thursday, Sunday and Monday night games (and December–January Saturdays), and every
+3 hours otherwise. Between builds, live scores come straight from Sleeper in the browser
+(`web/src/lib/live.ts`): every starter is rescored with the league's rules every minute while games are on,
+and points, live projections and win odds move with them. The Trade lab runs in the browser from a
+per-league kit (`engine/trade.ts`, the same code the server uses). Opening an arbitrary Sleeper league by
+username or ID needs the Node server; the Pages build serves the configured leagues.
+
+One-time setup (Pages on a private repository needs a paid plan such as GitHub Pro): turn Pages on with
+GitHub Actions as the source, switch the deploy job on, and run it once:
+
+```bash
+gh api -X POST repos/JakeAtSt8Frm/SLA2/pages -f build_type=workflow
+gh variable set PAGES_ENABLED --body true --repo JakeAtSt8Frm/SLA2
+gh workflow enable deploy.yml --repo JakeAtSt8Frm/SLA2
+gh workflow run deploy.yml --repo JakeAtSt8Frm/SLA2
+```
+
+Until then the deploy job is skipped and the Node server (Render, `render.yaml`) keeps serving the app;
+once the Pages site is up, delete the Render service in Render's dashboard and remove `render.yaml`. The site is at `https://<owner>.github.io/<repo>/`, and anyone with
+the link can open it, as with any Pages site. ESPN cookies come from `config/espn.json`, or from the
+`ESPN_SWID` / `ESPN_S2` repository secrets if set. Each run restores the Sleeper cache and the saved pregame
+forecasts (Actions cache, the copy published under `data/snapshots/`, and the forecasts saved before the
+move to GitHub in `data/snapshot-seed/`). A league that fails to build,
+for example after the ESPN login expires, keeps its last published data. On a private repository a
+deploy costs about 2 Actions minutes: roughly 1,500 of the 3,000 monthly minutes in season.
+
+`.github/workflows/retrain.yml` retrains all three models every Wednesday (after Monday night's game),
+runs `npm run check` (including the TypeScript-vs-scikit-learn parity test), commits the model files and
+starts a deploy. Run either workflow by hand from the Actions tab.
+
+**Node server.** Any Node 23.6+ host works (Railway, Fly.io, a VPS). A `Dockerfile` is included:
 
 ```bash
 docker build -t sla2 . && docker run -p 8787:8787 -v sla-data:/app/.cache -v sla-snap:/app/data sla2
@@ -186,8 +252,7 @@ docker build -t sla2 . && docker run -p 8787:8787 -v sla-data:/app/.cache -v sla
 
 Environment: `PORT` (default 8787), `HOST` (use `0.0.0.0` in containers), `SLA_DEFAULT_LEAGUE`,
 `SLA_CACHE_DIR`, `SLA_SNAPSHOT_DIR`. Persist the cache and snapshot directories so restarts are fast and
-the live track record accumulates. GitHub Pages alone can’t host this, because the model and simulations
-run server-side.
+the live track record accumulates.
 
 ## Data sources
 

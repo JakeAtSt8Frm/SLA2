@@ -12,6 +12,8 @@
     "dev:server": "node --watch server/index.ts",
     "dev:web": "vite",
     "build": "vite build",
+    "build:static": "VITE_STATIC=1 vite build && node scripts/build-static.ts && cp dist/index.html dist/404.html && touch dist/.nojekyll",
+    "preview:static": "vite preview --port 5181 --strictPort",
     "start": "NODE_ENV=production node server/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",

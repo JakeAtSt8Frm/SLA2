@@ -25,9 +25,9 @@ export default function PlayoffsPage() {
           <table className="tbl num text-[13px]">
             <thead>
               <tr>
-                <th>Team</th><th className="r">Now</th><th className="r">Proj. record</th><th className="r">Playoffs</th>
-                <th className="r"><span className="inline-flex items-center gap-1">This week <InfoTip>Playoff odds if the team wins vs loses its current-week game.</InfoTip></span></th>
-                <th className="r">#1 seed</th><th className="r">Final</th><th className="r">Title</th><th className="r">Last</th>
+                <th>Team</th><th className="r">Now</th><th className="r hidden sm:table-cell">Proj. record</th><th className="r">Playoffs</th>
+                <th className="r hidden sm:table-cell"><span className="inline-flex items-center gap-1">This week <InfoTip>Playoff odds if the team wins vs loses its current-week game.</InfoTip></span></th>
+                <th className="r hidden sm:table-cell">#1 seed</th><th className="r hidden sm:table-cell">Final</th><th className="r">Title</th><th className="r hidden sm:table-cell">Last</th>
               </tr>
             </thead>
             <tbody>
@@ -35,13 +35,13 @@ export default function PlayoffsPage() {
                 <tr key={t.rosterId} className={cx('row-hover', t.rosterId === myTeamId && 'bg-accent-soft')}>
                   <td><TeamLink rosterId={t.rosterId} showAvatar /></td>
                   <td className="r text-ink-2">{record(t.wins, t.losses, t.ties)}</td>
-                  <td className="r">{fmt(t.meanWins)}–{fmt(t.meanLosses)}</td>
+                  <td className="r hidden sm:table-cell">{fmt(t.meanWins)}–{fmt(t.meanLosses)}</td>
                   <td className="r text-[15px] font-semibold">{prob(t.playoffPct)}</td>
-                  <td className="r whitespace-nowrap text-[12px]">{t.ifWinPlayoffPct !== null && t.ifLosePlayoffPct !== null ? <span><span className="text-good-ink">W {prob(t.ifWinPlayoffPct)}</span> <span className="text-ink-3">/</span> <span className="text-bad-ink">L {prob(t.ifLosePlayoffPct)}</span></span> : '—'}</td>
-                  <td className="r">{prob(t.firstSeedPct)}</td>
-                  <td className="r">{prob(t.finalPct)}</td>
+                  <td className="r whitespace-nowrap text-[12px] hidden sm:table-cell">{t.ifWinPlayoffPct !== null && t.ifLosePlayoffPct !== null ? <span><span className="text-good-ink">W {prob(t.ifWinPlayoffPct)}</span> <span className="text-ink-3">/</span> <span className="text-bad-ink">L {prob(t.ifLosePlayoffPct)}</span></span> : '—'}</td>
+                  <td className="r hidden sm:table-cell">{prob(t.firstSeedPct)}</td>
+                  <td className="r hidden sm:table-cell">{prob(t.finalPct)}</td>
                   <td className="r font-semibold">{prob(t.champPct)}</td>
-                  <td className="r text-ink-2">{prob(t.lastPct)}</td>
+                  <td className="r text-ink-2 hidden sm:table-cell">{prob(t.lastPct)}</td>
                 </tr>
               ))}
             </tbody>
@@ -52,12 +52,12 @@ export default function PlayoffsPage() {
       <Card>
         <CardHeader title="Final standing distribution" />
         <div className="overflow-x-auto scroll-thin">
-          <div className="grid min-w-[520px] gap-1" style={{ gridTemplateColumns: `minmax(160px,1.3fr) repeat(${seeds}, minmax(52px,1fr))` }}>
+          <div className="grid gap-1" style={{ minWidth: 104 + seeds * 42, gridTemplateColumns: `minmax(100px,1.3fr) repeat(${seeds}, minmax(38px,1fr))` }}>
             <div />
             {Array.from({ length: seeds }, (_, i) => <div key={i} className={cx('pb-1 text-center text-[11px] font-semibold', i < p.playoffTeams ? 'text-ink-2' : 'text-ink-3')}>{ordinal(i + 1)}</div>)}
             {p.teams.map(t => (
               <div key={t.rosterId} className="contents">
-                <div className="flex items-center"><TeamLink rosterId={t.rosterId} /></div>
+                <div className="flex min-w-0 items-center"><TeamLink rosterId={t.rosterId} /></div>
                 {t.seedDist.map((v, i) => <HeatCell key={i} value={v} />)}
               </div>
             ))}
@@ -67,7 +67,7 @@ export default function PlayoffsPage() {
 
       <Card>
         <CardHeader title="Remaining schedule" />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {weeks.map(w => (
             <div key={w} className="rounded-[12px] border border-line p-3">
               <div className="eyebrow mb-2">Week {w}</div>

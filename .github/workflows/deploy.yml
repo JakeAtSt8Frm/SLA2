@@ -1,0 +1,91 @@
+# Builds the app and every league's data (scripts/build-static.ts) and publishes it to GitHub Pages.
+# Pages serve from a CDN, so nothing has to wake up; live scores in between builds come from
+# Sleeper directly in the browser.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Times are UTC. Sunday games: every 10 minutes.
+    - cron: '*/10 13-23 * * 0'
+    # Thursday, Sunday and Monday night games (they end after midnight UTC): every 15 minutes.
+    - cron: '*/15 0-5 * * 1,2,5'
+    # Saturday games in December and January.
+    - cron: '*/15 17-23 * 12,1 6'
+    # Otherwise every three hours, for injury news, waivers and projection updates.
+    - cron: '23 */3 * * *'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a queued run waits rather than cancelling one in progress.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Off until GitHub Pages is turned on for the repository (Pages on a private repository needs a paid
+    # plan); then set the repository variable PAGES_ENABLED to true. A skipped job uses no Actions minutes.
+    if: vars.PAGES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      # Sleeper/nflverse responses (revalidated with stored ETags) and saved pregame forecasts.
+      - name: Restore data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .cache
+            data/snapshots
+          key: sla-data-${{ github.run_id }}
+          restore-keys: sla-data-
+
+      - name: Pull pregame forecasts saved by earlier deploys
+        run: node scripts/pull-snapshots.ts
+        env:
+          SLA_SITE_URL: ${{ steps.pages.outputs.base_url }}
+
+      - name: Build app and league data
+        run: npm run build:static
+        env:
+          SLA_BASE: ${{ steps.pages.outputs.base_path }}/
+          SLA_SITE_URL: ${{ steps.pages.outputs.base_url }}
+          # Optional: ESPN cookies as repository secrets instead of config/espn.json.
+          ESPN_SWID: ${{ secrets.ESPN_SWID }}
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+
+      - name: Save data cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .cache
+            data/snapshots
+          key: sla-data-${{ github.run_id }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

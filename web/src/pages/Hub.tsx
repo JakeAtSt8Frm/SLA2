@@ -4,28 +4,34 @@ import { useApp } from '../lib/context.tsx';
 import { ago, fmt, ordinal, prob, record, teamColor } from '../lib/format.ts';
 import { navigate, pathFor } from '../lib/router.ts';
 import { Sparkline, WinBar } from '../charts/charts.tsx';
+import { useLiveGames } from '../lib/live.ts';
 import { Button, Card, CardHeader, Delta, Empty, ErrorState, InfoTip, PageHeader, PageSkeleton, PlayerLink, Pos, Stat, TeamAvatar, TeamLink, cx } from '../components/ui.tsx';
 
 export default function Hub() {
-  const { leagueId, boot, myTeamId } = useApp();
+  const { leagueId } = useApp();
   const q = useOverview(leagueId);
   if (q.isPending) return <PageSkeleton />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
-  const o = q.data;
+  return <HubView o={q.data} />;
+}
+
+function HubView({ o }: { o: Overview }) {
+  const { boot, myTeamId } = useApp();
   const week = boot.league.week;
+  const live = useLiveGames(o.matchups, week);
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow={`${boot.league.season} season · ${week ? `week ${week}` : 'complete'}`}
         title={boot.league.name}
       />
-      {myTeamId !== null && week !== null && <MyMatchup overview={o} />}
+      {myTeamId !== null && week !== null && <MyMatchup overview={o} games={live.games} />}
       <Standings rows={o.standings} />
-      <div className="grid gap-5 lg:grid-cols-2">
-        <ThisWeek games={o.matchups} />
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <ThisWeek games={live.games} />
         {o.awards.length > 0 && <Awards awards={o.awards} />}
       </div>
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {o.lastWeek && <LastWeek recap={o.lastWeek} />}
         <Transactions tx={o.transactions} />
       </div>
@@ -33,11 +39,11 @@ export default function Hub() {
   );
 }
 
-function MyMatchup({ overview }: { overview: Overview }) {
+function MyMatchup({ overview, games }: { overview: Overview; games: Overview['matchups'] }) {
   const { leagueId, myTeamId, teamName } = useApp();
   const lineup = useLineup(leagueId, myTeamId);
   const me = overview.standings.find(s => s.rosterId === myTeamId);
-  const game = overview.matchups.find(g => g.a.rosterId === myTeamId || g.b?.rosterId === myTeamId);
+  const game = games.find(g => g.a.rosterId === myTeamId || g.b?.rosterId === myTeamId);
   if (!me) return null;
   const mine = game ? (game.a.rosterId === myTeamId ? game.a : game.b) : null;
   const opp = game ? (game.a.rosterId === myTeamId ? game.b : game.a) : null;
@@ -46,7 +52,7 @@ function MyMatchup({ overview }: { overview: Overview }) {
   const optimizedP = l?.odds ? l.odds.optimized : null;
   return (
     <Card className="overflow-hidden" pad={false}>
-      <div className="grid gap-0 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
         <div className="p-5">
           <div className="eyebrow mb-3">Your matchup this week</div>
           {mine && opp ? (
@@ -54,11 +60,11 @@ function MyMatchup({ overview }: { overview: Overview }) {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
                   <TeamAvatar rosterId={mine.rosterId} size={40} />
-                  <div className="min-w-0"><div className="truncate font-semibold">{teamName(mine.rosterId)}</div><div className="num text-[13px] text-ink-3">proj {fmt(mine.projected)}</div></div>
+                  <div className="min-w-0"><div className="truncate font-semibold">{teamName(mine.rosterId)}</div><div className="num text-[13px] text-ink-3">{scoreLine(mine)}</div></div>
                 </div>
                 <div className="text-[12px] font-semibold text-ink-3">VS</div>
                 <div className="flex min-w-0 items-center gap-3 text-right">
-                  <div className="min-w-0"><div className="truncate font-semibold">{teamName(opp.rosterId)}</div><div className="num text-[13px] text-ink-3">proj {fmt(opp.projected)}</div></div>
+                  <div className="min-w-0"><div className="truncate font-semibold">{teamName(opp.rosterId)}</div><div className="num text-[13px] text-ink-3">{scoreLine(opp)}</div></div>
                   <TeamAvatar rosterId={opp.rosterId} size={40} />
                 </div>
               </div>
@@ -94,6 +100,9 @@ function MyMatchup({ overview }: { overview: Overview }) {
   );
 }
 
+/** "56.5 · proj 131.0" once a game has started, else the projection. */
+const scoreLine = (s: { points: number; projected: number | null }) => (s.points > 0 ? <><b className="font-semibold text-ink">{fmt(s.points)}</b> · proj {fmt(s.projected)}</> : `proj ${fmt(s.projected)}`);
+
 function Standings({ rows }: { rows: Overview['standings'] }) {
   const { myTeamId, boot } = useApp();
   const cut = boot.league.playoffTeams;
@@ -104,24 +113,24 @@ function Standings({ rows }: { rows: Overview['standings'] }) {
         <table className="tbl num text-[13px]">
           <thead>
             <tr>
-              <th className="w-8">#</th><th>Team</th><th className="r">W–L</th><th className="r">PF</th><th className="r">PA</th>
-              <th className="r"><span className="inline-flex items-center gap-1">All-play <InfoTip>Record if you played every team every week.</InfoTip></span></th>
-              <th className="r"><span className="inline-flex items-center gap-1">Luck <InfoTip>Actual wins minus all-play expected wins. Positive = lucky schedule.</InfoTip></span></th>
-              <th>Weekly</th><th className="r">Power</th><th className="r">Playoffs</th><th className="r">Title</th>
+              <th className="w-8">#</th><th>Team</th><th className="r">W–L</th><th className="r">PF</th><th className="r hidden sm:table-cell">PA</th>
+              <th className="r hidden sm:table-cell"><span className="inline-flex items-center gap-1">All-play <InfoTip>Record if you played every team every week.</InfoTip></span></th>
+              <th className="r hidden sm:table-cell"><span className="inline-flex items-center gap-1">Luck <InfoTip>Actual wins minus all-play expected wins. Positive = lucky schedule.</InfoTip></span></th>
+              <th className="hidden sm:table-cell">Weekly</th><th className="r hidden sm:table-cell">Power</th><th className="r">Playoffs</th><th className="r">Title</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={r.rosterId} className={cx('row-hover', r.rosterId === myTeamId && 'bg-accent-soft')}>
                 <td className="text-ink-3">{i + 1}{i === cut - 1 && <span className="sr-only"> (playoff line)</span>}</td>
-                <td className={cx('max-w-[220px]', i === cut - 1 && 'border-b-2 border-b-[var(--line-strong)]')}><TeamLink rosterId={r.rosterId} showAvatar /><div className="pl-[30px] text-[11px] text-ink-3">{r.owner}{r.streak ? ` · ${r.streak}` : ''}</div></td>
+                <td className={cx('max-w-[160px] sm:max-w-[220px]', i === cut - 1 && 'border-b-2 border-b-[var(--line-strong)]')}><TeamLink rosterId={r.rosterId} showAvatar /><div className="pl-[30px] text-[11px] text-ink-3">{r.owner}{r.streak ? ` · ${r.streak}` : ''}</div></td>
                 <td className="r font-semibold">{record(r.wins, r.losses, r.ties)}</td>
                 <td className="r">{fmt(r.pointsFor)}</td>
-                <td className="r text-ink-2">{fmt(r.pointsAgainst)}</td>
-                <td className="r text-ink-2">{record(r.allPlayWins, r.allPlayLosses)}</td>
-                <td className="r"><Delta value={r.luck} digits={2} /></td>
-                <td><Sparkline points={r.weekly.map((v, k) => [k + 1, v] as [number, number])} width={80} height={22} color={teamColor(r.rosterId)} /></td>
-                <td className="r font-medium">{fmt(r.power, 0)}</td>
+                <td className="r text-ink-2 hidden sm:table-cell">{fmt(r.pointsAgainst)}</td>
+                <td className="r text-ink-2 hidden sm:table-cell">{record(r.allPlayWins, r.allPlayLosses)}</td>
+                <td className="r hidden sm:table-cell"><Delta value={r.luck} digits={2} /></td>
+                <td className="hidden sm:table-cell"><Sparkline points={r.weekly.map((v, k) => [k + 1, v] as [number, number])} width={80} height={22} color={teamColor(r.rosterId)} /></td>
+                <td className="r font-medium hidden sm:table-cell">{fmt(r.power, 0)}</td>
                 <td className="r font-semibold">{prob(r.playoffPct)}</td>
                 <td className="r text-ink-2">{prob(r.champPct)}</td>
               </tr>
@@ -187,7 +196,7 @@ function LastWeek({ recap }: { recap: NonNullable<Overview['lastWeek']> }) {
           </div>
         ))}
       </div>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <div className="eyebrow mb-1.5">Top performers</div>
           {recap.topPerformers.slice(0, 5).map(p => (

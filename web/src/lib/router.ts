@@ -12,8 +12,17 @@ const PAGES = new Set<Page>(['hub', 'lineup', 'waivers', 'matchups', 'power', 'p
 
 export interface Route { leagueId: string; page: Page; param: string | null; search: URLSearchParams }
 
+/** Where the app is served from: '' locally, '/SLA2' on GitHub Pages. */
+const BASE = import.meta.env.BASE_URL.replace(/\/+$/, '');
+const appPath = () => {
+  const p = window.location.pathname;
+  return BASE && p.startsWith(BASE) ? p.slice(BASE.length) || '/' : p;
+};
+/** True when the address is a league page (anything else redirects to the default league). */
+export const atLeagueRoute = () => appPath().startsWith('/league/');
+
 function parse(): Route {
-  const parts = window.location.pathname.split('/').filter(Boolean);
+  const parts = appPath().split('/').filter(Boolean);
   const search = new URLSearchParams(window.location.search);
   if (parts[0] === 'league' && parts[1] && isLeagueId(parts[1])) {
     const page = (PAGES.has(parts[2] as Page) ? parts[2] : 'hub') as Page;
@@ -40,7 +49,7 @@ export function useRoute(): Route {
 }
 
 export const pathFor = (leagueId: string, page: Page, param?: string | number | null) =>
-  `/league/${leagueId}/${page}${param !== undefined && param !== null ? `/${param}` : ''}`;
+  `${BASE}/league/${leagueId}/${page}${param !== undefined && param !== null ? `/${param}` : ''}`;
 
 /** Read/write a single query parameter without losing the others. */
 export function useSearchParam(name: string): [string | null, (value: string | null, replace?: boolean) => void] {

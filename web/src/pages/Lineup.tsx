@@ -41,8 +41,25 @@ export default function LineupPage() {
       )}
 
       <Card pad={false}>
-        <div className="px-4 pt-4 sm:px-5"><CardHeader title="Lineup" /></div>
-        <div className="overflow-x-auto scroll-thin">
+        <div className="px-4 pt-4 sm:px-5"><CardHeader title="Lineup" subtitle={changes ? 'Recommended lineup; changes highlighted' : undefined} /></div>
+        {/* Phones: the recommended lineup as a list, each change noted under the player it brings in. */}
+        <ul className="sm:hidden">
+          {l.slots.map((slot, i) => {
+            const cur = l.current[i], opt = l.optimal[i];
+            const changed = (cur?.id ?? null) !== (opt?.id ?? null);
+            return (
+              <li key={i} className={cx('grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-2 border-t border-line px-4 py-2 text-[13px]', changed && 'bg-[color-mix(in_oklab,var(--good)_7%,transparent)]')}>
+                <span className="text-[12px] font-semibold text-ink-3">{slotLabel(slot)}</span>
+                <span className="min-w-0">
+                  <PlayerCell r={opt} />
+                  {changed && <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-ink-3"><ArrowRight size={11} className="shrink-0 text-good-ink" aria-hidden />replaces {cur ? `${cur.name} (${fmt(cur.week?.exp)})` : 'an empty slot'}</span>}
+                </span>
+                <span className="num text-right font-semibold">{opt?.week ? fmt(opt.week.exp) : '—'}</span>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="hidden overflow-x-auto scroll-thin sm:block">
           <table className="tbl text-[13px]">
             <thead>
               <tr><th className="w-12">Slot</th><th>Current</th><th className="r">Exp</th><th className="w-6" /><th>Recommended</th><th className="r">Exp</th><th className="hidden md:table-cell"><span className="inline-flex items-center gap-1">Range <InfoTip>Dot = expected. Bar = 10th–90th percentile outcome. Tick = median.</InfoTip></span></th><th className="hidden lg:table-cell">Game</th></tr>
@@ -74,13 +91,13 @@ export default function LineupPage() {
         {l.bench.length === 0 ? <Empty title="No bench players" /> : (
           <div className="overflow-x-auto scroll-thin">
             <table className="tbl text-[13px]">
-              <thead><tr><th>Player</th><th className="r">Exp</th><th className="r">If plays</th><th className="r">Play %</th><th className="hidden md:table-cell">Range</th><th className="hidden sm:table-cell">Game</th><th className="r">Season avg</th></tr></thead>
+              <thead><tr><th>Player</th><th className="r">Exp</th><th className="r hidden sm:table-cell">If plays</th><th className="r">Play %</th><th className="hidden md:table-cell">Range</th><th className="hidden sm:table-cell">Game</th><th className="r"><span className="sm:hidden">Avg</span><span className="hidden sm:inline">Season avg</span></th></tr></thead>
               <tbody>
                 {l.bench.map(r => r && (
                   <tr key={r.id} className="row-hover">
                     <td><PlayerCell r={r} ranks /></td>
                     <td className="num r font-semibold">{r.week ? fmt(r.week.exp) : '—'}</td>
-                    <td className="num r text-ink-2">{r.week ? fmt(r.week.mean) : '—'}</td>
+                    <td className="num r hidden text-ink-2 sm:table-cell">{r.week ? fmt(r.week.mean) : '—'}</td>
                     <td className="num r text-ink-2">{r.week ? prob(r.week.play) : '—'}</td>
                     <td className="hidden md:table-cell">{r.week && !r.week.bye && <RangeBar floor={r.week.floor} median={r.week.median} ceiling={r.week.ceiling} expected={r.week.exp} max={max} width={150} />}</td>
                     <td className="hidden whitespace-nowrap text-ink-2 sm:table-cell">{gameLabel(r)}</td>
@@ -133,9 +150,9 @@ function PlayerCell({ r, muted, ranks }: { r: Row; muted?: boolean; ranks?: bool
   return (
     <span className="flex min-w-0 items-center gap-2">
       <Pos pos={r.pos} />
-      <PlayerLink id={r.id} name={r.name} className={cx('max-w-[170px]', muted && 'font-normal text-ink-3')} />
-      <span className="text-[11px] text-ink-3">{r.team}</span>
-      {ranks && <Ranks ranks={r.ranks} />}
+      <PlayerLink id={r.id} name={r.name} className={cx('min-w-0 max-w-[170px]', muted && 'font-normal text-ink-3')} />
+      <span className="shrink-0 text-[11px] text-ink-3">{r.team}</span>
+      {ranks && <span className="hidden items-center gap-1 sm:inline-flex"><Ranks ranks={r.ranks} /></span>}
       <Injury status={r.injury} />
       {r.locked && <Lock size={12} className="text-ink-3" aria-label="locked" />}
     </span>
@@ -148,7 +165,7 @@ function Swaps({ l }: { l: LineupReady }) {
   return (
     <Card>
       <CardHeader title="Recommended changes" />
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {l.swaps.map(s => {
           const start = find(s.startId), sit = find(s.sitId);
           const close = s.confidence < 0.56;
@@ -158,13 +175,13 @@ function Swaps({ l }: { l: LineupReady }) {
                 <span className="eyebrow">{slotLabel(s.slot)}</span>
                 <span className="num text-[13px] font-semibold text-good-ink">{s.gain < 0.05 ? 'toss-up' : `+${fmt(s.gain)} pts`}</span>
               </div>
-              <div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <div className="mt-2 grid grid-cols-1 gap-2 min-[520px]:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] min-[520px]:items-center">
                 <div className="min-w-0">
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-good-ink">Start</div>
                   {start && <PlayerCell r={start} />}
                   <div className="num mt-0.5 text-[12px] text-ink-3">{start?.week ? `${fmt(start.week.exp)} exp · ${gameLabel(start)}` : ''}</div>
                 </div>
-                <MoveRight size={16} className="text-ink-3" aria-hidden />
+                <MoveRight size={16} className="hidden text-ink-3 min-[520px]:block" aria-hidden />
                 <div className="min-w-0">
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">Bench</div>
                   {sit ? <PlayerCell r={sit} muted /> : <span className="text-ink-3">Empty slot</span>}

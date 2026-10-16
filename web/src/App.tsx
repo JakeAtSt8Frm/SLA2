@@ -5,10 +5,10 @@ import {
   ArrowLeftRight, BarChart3, CalendarDays, ChartNoAxesCombined, FlaskConical, History, LayoutDashboard, ListChecks,
   Menu, Moon, RefreshCw, ScrollText, Search, Shield, Sparkles, Sun, Swords, Trophy, UserPlus, Users, X,
 } from 'lucide-react';
-import { prefetchCore, searchLeagues, useBootstrap, useLeagues, type LeagueSearchResult } from './lib/api.ts';
+import { prefetchCore, searchLeagues, STATIC, useBootstrap, useLeagues, type LeagueSearchResult } from './lib/api.ts';
 import { AppProvider, useApp, useTheme } from './lib/context.tsx';
 import { ago } from './lib/format.ts';
-import { DEFAULT_LEAGUE, isLeagueId, navigate, pathFor, useRoute, type Page } from './lib/router.ts';
+import { atLeagueRoute, DEFAULT_LEAGUE, isLeagueId, navigate, pathFor, useRoute, type Page } from './lib/router.ts';
 import { Button, cx, ErrorState, PageSkeleton, Select, TeamAvatar, useEscape } from './components/ui.tsx';
 import { PlayerDrawer } from './components/PlayerDrawer.tsx';
 
@@ -63,7 +63,7 @@ const NAV: { group: string; items: { page: Page; label: string; icon: ComponentT
 export function App() {
   const route = useRoute();
   useEffect(() => {
-    if (window.location.pathname === '/' || !window.location.pathname.startsWith('/league/')) navigate(pathFor(DEFAULT_LEAGUE, 'hub'), { replace: true });
+    if (!atLeagueRoute()) navigate(pathFor(DEFAULT_LEAGUE, 'hub'), { replace: true });
   }, []);
   const boot = useBootstrap(route.leagueId);
   if (boot.isPending) return <BootScreen />;
@@ -71,7 +71,7 @@ export function App() {
     return (
       <div className="mx-auto max-w-lg p-6 pt-24">
         <ErrorState error={boot.error} onRetry={() => void boot.refetch()} />
-        <div className="mt-4 flex justify-center"><LeagueFinder onDone={() => undefined} /></div>
+        <div className="mt-4 flex justify-center">{STATIC ? <YourLeagues onDone={() => undefined} /> : <LeagueFinder onDone={() => undefined} />}</div>
       </div>
     );
   }
@@ -126,11 +126,11 @@ function Shell() {
   }, [client, leagueId, boot.generatedAt]);
   return (
     <div className="flex min-h-dvh">
-      <aside className={cx('fixed inset-y-0 left-0 z-40 w-[248px] shrink-0 border-r border-line bg-surface transition-transform lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0', menu ? 'translate-x-0' : '-translate-x-full')}>
+      <aside className={cx('safe-top safe-bottom fixed inset-y-0 left-0 z-40 w-[248px] shrink-0 border-r border-line bg-surface transition-transform lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0', menu ? 'translate-x-0' : '-translate-x-full')}>
         <Sidebar onClose={() => setMenu(false)} />
       </aside>
       {menu && <div className="fixed inset-0 z-30 bg-[var(--overlay)] lg:hidden" onClick={() => setMenu(false)} aria-hidden />}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col overflow-x-clip">
         <TopBar onMenu={() => setMenu(true)} />
         <main className="mx-auto w-full max-w-[1320px] flex-1 px-4 pb-16 pt-5 sm:px-6 lg:px-8">
           <Suspense fallback={<PageSkeleton />}>
@@ -158,7 +158,7 @@ function Sidebar({ onClose }: { onClose: () => void }) {
         </a>
         <button className="rounded-md p-1.5 text-ink-3 hover:bg-surface-2 lg:hidden" onClick={onClose} aria-label="Close menu"><X size={18} /></button>
       </div>
-      <nav className="flex-1 overflow-y-auto px-2.5 pb-4 scroll-thin" aria-label="Main">
+      <nav className="overscroll-contain flex-1 overflow-y-auto px-2.5 pb-4 scroll-thin" aria-label="Main">
         {NAV.map(group => (
           <div key={group.group} className="mt-4">
             <div className="eyebrow px-2.5 pb-1.5">{group.group}</div>
@@ -191,7 +191,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
   const fetching = useIsFetching();
   const [finder, setFinder] = useState(false);
   return (
-    <header className="sticky top-0 z-20 border-b border-line bg-[color-mix(in_oklab,var(--page)_88%,transparent)] backdrop-blur">
+    <header className="safe-top sticky top-0 z-20 border-b border-line bg-[color-mix(in_oklab,var(--page)_88%,transparent)] backdrop-blur">
       <div className="mx-auto flex h-14 max-w-[1320px] items-center gap-2 px-4 sm:px-6 lg:px-8">
         <button className="-ml-1.5 rounded-md p-1.5 text-ink-2 hover:bg-surface-2 lg:hidden" onClick={onMenu} aria-label="Open menu"><Menu size={20} /></button>
         <button onClick={() => setFinder(true)} className="flex min-w-0 items-center gap-2 rounded-[9px] px-2 py-1 text-left hover:bg-surface-2" title="Switch league">
@@ -257,8 +257,12 @@ function LeagueDialog({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="rounded-md p-1 text-ink-3 hover:bg-surface-2" aria-label="Close"><X size={18} /></button>
         </div>
         <YourLeagues onDone={onClose} />
-        <div className="eyebrow mb-2 mt-5">Open another Sleeper league</div>
-        <LeagueFinder onDone={onClose} />
+        {!STATIC && (
+          <>
+            <div className="eyebrow mb-2 mt-5">Open another Sleeper league</div>
+            <LeagueFinder onDone={onClose} />
+          </>
+        )}
       </div>
     </div>,
     document.body,
@@ -268,7 +272,8 @@ function LeagueDialog({ onClose }: { onClose: () => void }) {
 /** The leagues this deployment is set up for (Sleeper and ESPN), one click away. */
 function YourLeagues({ onDone }: { onDone: () => void }) {
   const leagues = useLeagues();
-  const { leagueId } = useApp();
+  // Also shown on the error screen, where no league is open.
+  const leagueId = useRoute().leagueId;
   if (!leagues.data?.length) return null;
   return (
     <div className="space-y-1">

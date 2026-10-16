@@ -90,7 +90,7 @@ export default function RecapPage() {
 
       <Card>
         <CardHeader title="Team MVPs" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {r.mvps.map(m => (
             <div key={m.rosterId} className="rounded-[12px] border border-line p-3">
               <TeamLink rosterId={m.rosterId} showAvatar className="font-semibold" />
@@ -108,7 +108,7 @@ export default function RecapPage() {
           {r.recaps.map(w => (
             <details key={w.week} className="group rounded-[12px] border border-line p-3" open={w === r.recaps[0]}>
               <summary className="flex cursor-pointer list-none items-center justify-between font-semibold">Week {w.week}<span className="text-[12px] font-normal text-ink-3 group-open:hidden">Show</span></summary>
-              <div className="mt-3 grid gap-4 md:grid-cols-3">
+              <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="space-y-1.5 text-[13px]">
                   {w.results.map(x => <div key={`${x.winner}-${x.loser}`} className="flex justify-between gap-2"><span className="truncate"><b>{teamName(x.winner)}</b> def. {teamName(x.loser ?? 0)}</span><span className="num shrink-0">{fmt(x.winnerPts)}–{fmt(x.loserPts)}</span></div>)}
                 </div>

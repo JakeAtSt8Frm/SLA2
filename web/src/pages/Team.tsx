@@ -33,7 +33,7 @@ function TeamView({ t }: { t: TeamPage }) {
         subtitle={`${team.owner} · ${record(team.wins, team.losses, team.ties)} · ${fmt(team.pointsFor)} PF${acquisition}`}
         right={<Select label="Team" value={team.rosterId} onChange={v => navigate(pathFor(leagueId, 'team', v))} options={boot.teams.map(x => ({ value: x.rosterId, label: x.name }))} className="w-56" />}
       />
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Card>
           <CardHeader title="Season outlook" />
           <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
@@ -79,7 +79,7 @@ function TeamView({ t }: { t: TeamPage }) {
       {t.schedule.length > 0 && (
         <Card>
           <CardHeader title="Remaining schedule" right={team.rosterId === myTeamId ? <Button size="sm" onClick={() => navigate(pathFor(leagueId, 'lineup'))}>Start/sit <ArrowRight size={14} /></Button> : undefined} />
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {t.schedule.map(s => (
               <div key={s.week} className="rounded-[10px] border border-line p-2.5">
                 <div className="flex justify-between text-[12px]"><span className="font-semibold">Week {s.week}</span><span className="num text-ink-3">{fmt(s.projected)} – {fmt(s.opponentProjected)}</span></div>

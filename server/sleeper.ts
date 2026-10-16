@@ -1,7 +1,7 @@
 import { cached, FOREVER, HOUR, MINUTE, NOT_MODIFIED, type Revalidation } from './cache.ts';
 import { normalizePosition, normalizeTeam } from '../engine/positions.ts';
 import type { NflGame, PlayerInfo, Pos, Stats } from '../engine/types.ts';
-import type { ScoringSettings } from '../engine/scoring.ts';
+import { cleanProviderStats, type ScoringSettings } from '../engine/scoring.ts';
 
 const HOSTS = ['https://api.sleeper.app', 'https://api.sleeper.com'];
 const NFLVERSE_GAMES = 'https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv';
@@ -88,17 +88,7 @@ const num = (v: unknown, fallback = 0): number => (typeof v === 'number' && Numb
 const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
 const ids = (v: unknown): string[] => arr(v).filter((x): x is string => typeof x === 'string' && x !== '0' && x.length > 0);
 
-/** Drop provider-precomputed totals, ADP and rank fields — they are never this league's score. */
-function cleanStats(raw: unknown): Stats {
-  const out: Stats = {};
-  for (const [key, value] of Object.entries(obj(raw))) {
-    if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) continue;
-    if (key.startsWith('adp') || key.startsWith('pos_adp') || key.startsWith('pos_rank') || key.startsWith('rank_')) continue;
-    if (key.startsWith('pts_') && !key.startsWith('pts_allow')) continue;
-    out[key] = value;
-  }
-  return out;
-}
+const cleanStats = cleanProviderStats;
 
 // ─── League endpoints ────────────────────────────────────────────────────────
 

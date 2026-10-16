@@ -99,6 +99,38 @@ function finish(f: Omit<WeekForecast, 'expected' | 'floor' | 'median' | 'ceiling
   };
 }
 
+interface PregameCore { mean: number; play: number; rosPlay: number; provider: number | null; opponent: string; home: boolean; kickoff: number | null; defense: boolean }
+
+/**
+ * Point forecast for one player-week: E[points | plays], availability and the rescored provider
+ * projection. `tagless` ignores the current injury tag (replaying a past week, whose pregame tag is unknown).
+ */
+function pregameCore(env: ForecastEnv, p: PlayerInfo, id: string, week: number, team: string, game: NflGame, tagless = false): PregameCore {
+  const projection = env.projections(week)?.get(id);
+  const ctx = gameContext(game, team);
+  const stats = projection && hasForecast(projection.stats) ? projection.stats : undefined;
+  const provider = stats ? scoreStatsExact(completeStats(stats, p.pos, true), env.scoring) : null;
+  const defense = p.pos === 'DEF';
+  // A team defense always takes the field; its forecast is the rescored projection (engine/dst.ts).
+  const x = defense ? null : env.state.features(id, env.season, week, stats, ctx, team);
+  const mean = x ? Math.max(0, env.model.predict(x)) : provider ?? env.defense?.fallback ?? 0;
+  const status = tagless ? null : p.injuryStatus;
+
+  const ahead = week - env.currentWeek;
+  const baseNone = env.model.playProbability(null, true);
+  let play: number, rosPlay: number;
+  if (defense) play = rosPlay = 1;
+  else if (!p.team && !tagless) play = rosPlay = 0;
+  else if (ahead <= 0) play = rosPlay = env.model.playProbability(status, true, x ? roleOf(p.pos, x) : undefined);
+  else {
+    play = status ? futurePlayProbability(baseNone, status, ahead) : baseNone;
+    const healthy = env.model.healthyAhead(aheadGroup(p.pos), ahead);
+    rosPlay = status ? futurePlayProbability(healthy, status, ahead) : healthy;
+  }
+  if (!stats && !defense) { play *= NO_PROJECTION_PLAY_FACTOR; rosPlay *= NO_PROJECTION_PLAY_FACTOR; }
+  return { mean, play, rosPlay, provider, opponent: ctx.opponent, home: ctx.home, kickoff: game.kickoff, defense };
+}
+
 /**
  * The forecast as it stands before kickoff. It depends only on the player's history, the week's
  * projection and game, and his status, so the server can reuse it across rebuilds while live
@@ -111,34 +143,29 @@ export function pregameForecast(env: ForecastEnv, id: string, week: number): Wee
     opponent: null, home: null, kickoff: null, bye: false, residuals: new Array(21).fill(0), live: null, ...extra,
   });
   if (!p) return empty();
-  const projection = env.projections(week)?.get(id);
-  const team = projection?.team ?? p.team;
+  const team = env.projections(week)?.get(id)?.team ?? p.team;
   if (!team) return empty();
   const game = env.gameFor(team, week);
   if (!game) return empty({ bye: true });
-  const ctx = gameContext(game, team);
-  const stats = projection && hasForecast(projection.stats) ? projection.stats : undefined;
-  const provider = stats ? scoreStatsExact(completeStats(stats, p.pos, true), env.scoring) : null;
-  const defense = p.pos === 'DEF';
-  // A team defense always takes the field; its forecast is the rescored projection (engine/dst.ts).
-  const x = defense ? null : env.state.features(id, env.season, week, stats, ctx, team);
-  const mean = x ? Math.max(0, env.model.predict(x)) : provider ?? env.defense?.fallback ?? 0;
+  const c = pregameCore(env, p, id, week, team, game);
+  const residuals = c.defense ? env.defense?.residuals ?? new Array(21).fill(0) : env.model.quantiles(p.pos, c.mean);
+  return finish({ id, week, mean: c.mean, play: c.play, rosPlay: c.rosPlay, provider: c.provider, opponent: c.opponent, home: c.home, kickoff: c.kickoff, bye: false, residuals, live: null });
+}
 
-  const ahead = week - env.currentWeek;
-  const baseNone = env.model.playProbability(null, true);
-  let play: number, rosPlay: number;
-  if (defense) play = rosPlay = 1;
-  else if (!p.team) play = rosPlay = 0;
-  else if (ahead <= 0) play = rosPlay = env.model.playProbability(p.injuryStatus, true, x ? roleOf(p.pos, x) : undefined);
-  else {
-    play = p.injuryStatus ? futurePlayProbability(baseNone, p.injuryStatus, ahead) : baseNone;
-    const healthy = env.model.healthyAhead(aheadGroup(p.pos), ahead);
-    rosPlay = p.injuryStatus ? futurePlayProbability(healthy, p.injuryStatus, ahead) : healthy;
-  }
-  if (!stats && !defense) { play *= NO_PROJECTION_PLAY_FACTOR; rosPlay *= NO_PROJECTION_PLAY_FACTOR; }
+/** A past week's pregame numbers, rebuilt from what was known before kickoff (the injury tag aside). */
+export interface PregamePoint { exp: number; mean: number; provider: number | null }
 
-  const residuals = defense ? env.defense?.residuals ?? new Array(21).fill(0) : env.model.quantiles(p.pos, mean);
-  return finish({ id, week, mean, play, rosPlay, provider, opponent: ctx.opponent, home: ctx.home, kickoff: game.kickoff, bye: false, residuals, live: null });
+/**
+ * Replays the pregame forecast of a completed week. `env.state` must hold only the games before
+ * `week`, and `env.currentWeek` must be `week`. `team` is the team the player was on that week.
+ */
+export function replayForecast(env: ForecastEnv, id: string, week: number, team: string | null): PregamePoint | null {
+  const p = env.players[id];
+  const t = team ?? env.projections(week)?.get(id)?.team ?? p?.team;
+  const game = t ? env.gameFor(t, week) : undefined;
+  if (!p || !t || !game) return null;
+  const c = pregameCore(env, p, id, week, t, game, true);
+  return { exp: c.play * c.mean, mean: c.mean, provider: c.provider };
 }
 
 /**

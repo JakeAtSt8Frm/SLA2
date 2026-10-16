@@ -30,7 +30,7 @@ export default function TradePage() {
   return (
     <div className="space-y-5">
       <PageHeader title="Trade lab" />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
         <RosterPicker rosterId={a} onTeam={v => { setA(v); setAGives([]); if (v === b) setB(a); trade.reset(); }} exclude={b} players={byOwner.get(a) ?? []} selected={aGives} onPick={id => pick('a', id)} />
         <div className="flex items-center justify-center"><Button variant="ghost" onClick={swapTeams} title="Swap sides"><ArrowLeftRight size={18} /><span className="sr-only">Swap sides</span></Button></div>
         <RosterPicker rosterId={b} onTeam={v => { setB(v); setBGives([]); if (v === a) setA(b); trade.reset(); }} exclude={a} players={byOwner.get(b) ?? []} selected={bGives} onPick={id => pick('b', id)} />
@@ -99,7 +99,7 @@ function Result({ r }: { r: Trade }) {
           <div className="text-[18px] font-semibold">{verdict}</div>
         </div>
       </Card>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {[r.a, r.b].map(s => <SideResult key={s.rosterId} s={s} weeks={r.weeks.length} />)}
       </div>
     </div>
@@ -133,7 +133,7 @@ function SideResult({ s, weeks }: { s: Trade['a']; weeks: number }) {
           </div>
         )}
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div><div className="eyebrow mb-1">Receives</div>{s.gets.length ? s.gets.map(p => <div key={p.id} className="flex items-center gap-2 py-0.5 text-[13px]"><Pos pos={p.pos} /><PlayerLink id={p.id} name={p.name} /><span className="num text-[12px] text-ink-3">{fmt(p.value?.rosAvg)}/wk</span></div>) : <div className="text-[13px] text-ink-3">Nothing</div>}</div>
         <div><div className="eyebrow mb-1">Sends</div>{s.gives.length ? s.gives.map(p => <div key={p.id} className="flex items-center gap-2 py-0.5 text-[13px] text-ink-2"><Pos pos={p.pos} /><PlayerLink id={p.id} name={p.name} className="font-normal text-ink-2" /><span className="num text-[12px] text-ink-3">{fmt(p.value?.rosAvg)}/wk</span></div>) : <div className="text-[13px] text-ink-3">Nothing</div>}</div>
       </div>
