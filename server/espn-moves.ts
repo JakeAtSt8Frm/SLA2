@@ -77,6 +77,16 @@ export async function playerStates(c: MoveContext, ids: number[]): Promise<Playe
   });
 }
 
+/** Everyone on waivers right now, with when they clear. */
+export async function waiverWire(c: MoveContext): Promise<PlayerState[]> {
+  const raw = obj(await espnJson(`${leagueRoute(c)}?view=kona_player_info&scoringPeriodId=${c.scoringPeriodId}`,
+    { players: { filterStatus: { value: ['WAIVERS'] } } }));
+  return arr(raw.players).map(obj).filter(p => p.status === 'WAIVERS').map(p => ({
+    id: num(p.id), name: String(obj(p.player).fullName ?? p.id), status: 'WAIVERS' as const, onTeamId: num(p.onTeamId),
+    waiverProcessDate: typeof p.waiverProcessDate === 'number' ? p.waiverProcessDate : null,
+  }));
+}
+
 // ─── Finding players by name ────────────────────────────────────────────────
 
 export type Directory = Record<string, [name: string, pos: number, team: number]>;
@@ -182,6 +192,8 @@ export interface ClaimSpec {
   /** Keep going while the player is on another roster (or, with keepPriority, until they clear waivers). */
   watch: boolean;
   pollMs?: number;
+  /** Stop watching at this time and report `continuing` (a GitHub Actions job hands over to a fresh run). */
+  deadline?: number;
 }
 
 export type ClaimPhase = 'checking' | 'watching' | 'waiting' | 'sending';
@@ -196,7 +208,7 @@ export interface ClaimHooks {
 
 export type ClaimOutcome =
   | { kind: 'added' | 'claimed' | 'already' | 'dry-run'; ok: true; message: string }
-  | { kind: 'not-yet'; ok: true; message: string; until: number | null }
+  | { kind: 'not-yet'; ok: true; message: string; until: number | null; continuing?: boolean }
   | { kind: 'failed' | 'cancelled'; ok: false; message: string };
 
 export const when = (ts: number) => new Date(ts).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -261,6 +273,7 @@ export async function runClaim(spec: ClaimSpec, hooks: ClaimHooks): Promise<Clai
   const note = (msg: string) => { if (msg !== lastNote) log(msg); lastNote = msg; };
   for (;;) {
     if (signal?.aborted) return cancelled();
+    if (spec.deadline && Date.now() >= spec.deadline) return { kind: 'not-yet', ok: true, message: lastNote || 'Still watching.', until: null, continuing: true };
     hooks.phase?.('checking');
     let state: PlayerState | undefined;
     try {

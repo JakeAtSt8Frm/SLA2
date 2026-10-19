@@ -1,0 +1,79 @@
+# ESPN roster moves started from the GitHub Pages app (web/src/lib/github.ts) with the owner's GitHub
+# token: runs scripts/espn-claim.ts with the ESPN login in config/espn.json (or the ESPN_* secrets).
+# The result is an annotation on the run, which the app reads back. A watch runs for up to 5.5 hours,
+# then starts a fresh run of itself to keep going; cancelling the latest run in the app stops it.
+name: Claim
+# The app finds a claim's runs by this title: id | league | ESPN id | mode | player | drop.
+run-name: "SLA claim ${{ inputs.claim_id }} | ${{ inputs.league }} | ${{ inputs.add }} | ${{ inputs.keep_priority && 'keep' || inputs.watch && 'watch' || 'now' }} | ${{ inputs.label }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      claim_id: { description: 'Id the app tracks this claim by', required: true, type: string }
+      league: { description: 'ESPN league (espn-<id>)', required: true, type: string }
+      add: { description: 'ESPN id of the player to get', required: true, type: string }
+      drop: { description: 'ESPN id of the player to drop (blank for none)', required: false, type: string, default: '' }
+      bid: { description: 'FAAB bid', required: false, type: string, default: '0' }
+      keep_priority: { description: 'Wait for waivers to clear instead of claiming', required: false, type: boolean, default: false }
+      watch: { description: 'Keep going until the player can be added', required: false, type: boolean, default: false }
+      dry_run: { description: 'Log the move instead of sending it', required: false, type: boolean, default: false }
+      label: { description: 'Player | drop, shown in the app', required: true, type: string }
+
+permissions:
+  contents: read
+  actions: write # to continue a long watch in a new run
+
+concurrency:
+  group: claim-${{ inputs.claim_id }}
+  cancel-in-progress: false
+
+jobs:
+  claim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      CLAIM_ID: ${{ inputs.claim_id }}
+      LEAGUE: ${{ inputs.league }}
+      ADD: ${{ inputs.add }}
+      DROP: ${{ inputs.drop }}
+      BID: ${{ inputs.bid }}
+      KEEP: ${{ inputs.keep_priority }}
+      WATCH: ${{ inputs.watch }}
+      DRY: ${{ inputs.dry_run }}
+      LABEL: ${{ inputs.label }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - id: claim
+        name: Claim
+        env:
+          # Optional: ESPN cookies as repository secrets instead of config/espn.json.
+          ESPN_SWID: ${{ secrets.ESPN_SWID }}
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+        run: |
+          if ! [[ "$CLAIM_ID" =~ ^[a-z0-9-]{6,40}$ && "$LEAGUE" =~ ^espn-[0-9]{4,12}$ && "$ADD" =~ ^-?[0-9]{1,12}$ && "$DROP" =~ ^(-?[0-9]{1,12})?$ && "$BID" =~ ^[0-9]{1,4}$ ]]; then
+            echo "::error title=SLA claim::Invalid claim inputs"
+            exit 1
+          fi
+          args=("$LEAGUE" --add "$ADD" --bid "$BID" --max-minutes 330)
+          if [ -n "$DROP" ]; then args+=(--drop "$DROP"); fi
+          if [ "$KEEP" = true ]; then args+=(--keep-priority); fi
+          if [ "$WATCH" = true ]; then args+=(--watch); fi
+          if [ "$DRY" != true ]; then args+=(--execute); fi
+          node scripts/espn-claim.ts "${args[@]}"
+
+      - name: Keep watching in a new run
+        if: steps.claim.outputs.continue == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh workflow run claim.yml --ref "$GITHUB_REF_NAME"
+          -f claim_id="$CLAIM_ID" -f league="$LEAGUE" -f add="$ADD" -f drop="$DROP" -f bid="$BID"
+          -f keep_priority="$KEEP" -f watch="$WATCH" -f dry_run="$DRY" -f label="$LABEL"

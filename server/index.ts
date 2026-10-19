@@ -9,7 +9,7 @@ import { configuredEspnLeagues, validEspnId } from './espn.ts';
 import { findLeagues } from './sleeper.ts';
 import { sendJson } from './http.ts';
 import { recordSnapshot, trackRecord } from './snapshots.ts';
-import { cancelClaim, claimInfo, createClaim, type ClaimRequest } from './claims.ts';
+import { cancelClaim, claimInfo, createClaim, resumeClaims, type ClaimRequest } from './claims.ts';
 import * as views from './views.ts';
 import { HttpError } from './views.ts';
 
@@ -80,6 +80,7 @@ const localOnly: MiddlewareHandler = async (c, next) => {
   c.header('Cache-Control', 'no-store');
   await next();
 };
+resumeClaims();
 app.use('/api/leagues/:id/claims', localOnly);
 app.use('/api/leagues/:id/claims/*', localOnly);
 app.get('/api/leagues/:id/claims', async c => c.json(await claimInfo(leagueId(c), c.req.query('player') ?? null)));

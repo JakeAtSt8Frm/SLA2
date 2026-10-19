@@ -80,7 +80,7 @@ export function PlayerDrawer() {
           {q.isPending && <div className="space-y-3"><Skeleton className="h-32" /><Skeleton className="h-48" /></div>}
           {d && p && (
             <>
-              {p.owner === null || p.owner !== boot.myRosterId ? <ClaimPanel pid={pid} initialDrop={dropParam} /> : null}
+              {p.owner === null || p.owner !== boot.myRosterId ? <ClaimPanel pid={pid} initialDrop={dropParam} owner={p.owner} name={p.name} /> : null}
               {f ? (
                 <Card>
                   <div className="flex flex-wrap items-baseline justify-between gap-2">

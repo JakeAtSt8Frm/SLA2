@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import type * as V from '../../../server/views.ts';
 import type { trackRecord } from '../../../server/snapshots.ts';
 import type * as C from '../../../server/claims.ts';
+import { cancelClaim as cancelGitHubClaim, getToken, githubClaims, listClaims, startClaim as startGitHubClaim, type GitHubClaim } from './github.ts';
 import { evaluateTrade, TradeError, type TradeKit, type TradeRequest } from '../../../engine/trade.ts';
 
 export type Bootstrap = Awaited<ReturnType<typeof V.bootstrap>>;
@@ -141,27 +142,75 @@ export const useTracking = (id: string) => useQuery({ queryKey: ['tracking', id]
 export const useTrade = (id: string) => useMutation({
   mutationFn: (body: TradeRequest) => (STATIC ? tradeLocally(id, body) : request<Trade>(`${base(id)}/trade`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
 });
-/** ESPN auto-claims run on the local server, which holds the ESPN login; the static site has none. */
+/**
+ * ESPN claims. With the local server (npm run dev) the server makes the move with the ESPN login.
+ * On the static site the page starts .github/workflows/claim.yml with the owner's GitHub token
+ * (web/src/lib/github.ts) and sets up the claim from data the build published (claims.json).
+ */
 export type ClaimInfo = Awaited<ReturnType<typeof C.claimInfo>>;
 export type ClaimJob = C.ClaimJob;
-export const CLAIMS_AVAILABLE = !STATIC;
-export const useClaimInfo = (id: string, pid: string | null, enabled = true) => useQuery({
-  queryKey: ['claims', id, pid ?? 'all'],
-  queryFn: () => request<ClaimInfo>(`${base(id)}/claims${pid ? `?player=${encodeURIComponent(pid)}` : ''}`),
-  enabled: enabled && CLAIMS_AVAILABLE, staleTime: 5_000,
-  refetchInterval: q => (q.state.data?.jobs.some(j => j.status === 'active') ? 5_000 : 30_000),
+export type ClaimSnapshot = Awaited<ReturnType<typeof C.claimSnapshot>>;
+/** A claim as the panel shows it: a local server job, or a GitHub Actions run. */
+export interface ClaimJobView {
+  id: string; add: { espnId: number; name: string }; drop: { name: string } | null; keepPriority: boolean;
+  status: ClaimJob['status']; phase: ClaimJob['phase'] | 'queued' | 'running'; result: string | null;
+  log: { at: number; msg: string }[]; createdAt: number; updatedAt: number; url?: string;
+}
+export type ClaimInfoView = Omit<ClaimInfo, 'jobs'> & { jobs: ClaimJobView[]; jobsError: string | null };
+export const CLAIMS_AVAILABLE = !STATIC || githubClaims;
+
+const fromGitHub = (c: GitHubClaim): ClaimJobView => ({
+  id: c.id, add: { espnId: c.addEspnId, name: c.addName }, drop: c.dropName ? { name: c.dropName } : null, keepPriority: c.mode === 'keep',
+  status: c.status, phase: c.phase, result: c.result, log: [], createdAt: c.createdAt, updatedAt: c.updatedAt, url: c.url,
 });
+
+/** The static site's version of the server's claim info: published roster data, plus your claims' runs on GitHub. */
+async function staticClaimInfo(id: string, pid: string | null, player?: { owner: number | null; name: string }): Promise<ClaimInfoView> {
+  const snap = await request<ClaimSnapshot>(`${base(id)}/claims`);
+  let jobs: ClaimJobView[] = [], jobsError: string | null = null;
+  if (getToken()) {
+    try { jobs = (await listClaims(id)).map(fromGitHub); } catch (error) { jobsError = (error as Error).message; }
+  }
+  let target: ClaimInfo['target'] = null;
+  if (pid) {
+    const espnId = snap.espnIds[pid];
+    if (espnId === undefined) throw new ApiError(404, 'ESPN doesn’t list this player.');
+    const owner = player?.owner ?? null;
+    const waiver = String(espnId) in snap.waivers;
+    target = {
+      pid, espnId, name: player?.name ?? pid, status: owner ? 'ONTEAM' : waiver ? 'WAIVERS' : 'FREEAGENT', onTeamId: owner ?? 0,
+      waiverProcessDate: !owner && waiver ? snap.waivers[String(espnId)] : null,
+      mine: owner === snap.teamId, pendingClaim: false, suggestedDrop: snap.suggestedDrops[pid] ?? null,
+    };
+  }
+  return {
+    mode: 'github', asOf: snap.builtAt, dryRun: false, teamId: snap.teamId, teamName: snap.teamName, freeAgency: snap.freeAgency, budget: snap.budget,
+    rosterLimit: snap.rosterLimit, openSpots: snap.openSpots, roster: snap.roster, target, jobs, jobsError,
+  };
+}
+
+export const useClaimInfo = (id: string, pid: string | null, opts: { enabled?: boolean; player?: { owner: number | null; name: string }; token?: string | null } = {}) => useQuery({
+  queryKey: ['claims', id, pid ?? 'all', STATIC ? !!opts.token : 'server'],
+  queryFn: (): Promise<ClaimInfoView> => (STATIC ? staticClaimInfo(id, pid, opts.player)
+    : request<ClaimInfo>(`${base(id)}/claims${pid ? `?player=${encodeURIComponent(pid)}` : ''}`).then(info => ({ ...info, jobsError: null }))),
+  enabled: (opts.enabled ?? true) && CLAIMS_AVAILABLE, staleTime: 5_000,
+  refetchInterval: q => (q.state.data?.jobs.some(j => j.status === 'active') ? (STATIC ? 10_000 : 5_000) : STATIC ? 60_000 : 30_000),
+});
+
+export interface StartClaim { pid: string; espnId: number; name: string; drop: { espnId: number; name: string } | null; bid: number; keepPriority: boolean; watch: boolean }
 export const useStartClaim = (id: string) => {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: C.ClaimRequest) => request<ClaimJob>(`${base(id)}/claims`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    mutationFn: (c: StartClaim): Promise<unknown> => (STATIC
+      ? startGitHubClaim({ league: id, add: c.espnId, addName: c.name, drop: c.drop, bid: c.bid, keepPriority: c.keepPriority, watch: c.watch })
+      : request<ClaimJob>(`${base(id)}/claims`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ player: c.pid, drop: c.drop?.espnId ?? null, bid: c.bid, keepPriority: c.keepPriority } satisfies C.ClaimRequest) })),
     onSettled: () => client.invalidateQueries({ queryKey: ['claims', id] }),
   });
 };
 export const useCancelClaim = (id: string) => {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (job: string) => request<ClaimJob>(`${base(id)}/claims/${encodeURIComponent(job)}`, { method: 'DELETE' }),
+    mutationFn: (job: string): Promise<unknown> => (STATIC ? cancelGitHubClaim(job) : request<ClaimJob>(`${base(id)}/claims/${encodeURIComponent(job)}`, { method: 'DELETE' })),
     onSettled: () => client.invalidateQueries({ queryKey: ['claims', id] }),
   });
 };

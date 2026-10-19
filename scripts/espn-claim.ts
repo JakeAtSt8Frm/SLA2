@@ -12,12 +12,14 @@
  *                  poll for the drop; with --keep-priority, sleep until waivers clear
  * --keep-priority  waiver leagues: don't spend a claim; add the player the moment they clear waivers
  * --poll <sec>     how often to check while watching (default 30)
+ * --max-minutes    stop watching after this long and say so (GitHub Actions runs hand over to a new run)
  * --execute        send the move; without it, prints the request that would be sent
  *
  * Free agents are added immediately. A player on waivers gets a claim placed now (ESPN processes
  * claims in waiver order whenever they were placed). Runs on this machine with the ESPN login in
  * config/espn.json; keep the Mac awake for long watches (caffeinate -i npm run espn:claim -- …).
  */
+import { appendFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { configuredEspnLeagues } from '../server/espn.ts';
 import { findPlayer, moveContext, openSpots, rosterPlayer, runClaim } from '../server/espn-moves.ts';
@@ -25,13 +27,18 @@ import { findPlayer, moveContext, openSpots, rosterPlayer, runClaim } from '../s
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
-    add: { type: 'string' }, drop: { type: 'string' }, bid: { type: 'string' }, poll: { type: 'string' },
+    add: { type: 'string' }, drop: { type: 'string' }, bid: { type: 'string' }, poll: { type: 'string' }, 'max-minutes': { type: 'string' },
     watch: { type: 'boolean', default: false }, 'keep-priority': { type: 'boolean', default: false }, execute: { type: 'boolean', default: false },
   },
 });
 
 const log = (msg: string) => console.log(`${new Date().toLocaleTimeString()}  ${msg}`);
-const fail = (msg: string): never => { console.error(msg); process.exit(1); };
+// In GitHub Actions the result becomes an annotation on the run, which the web app reads back.
+const ACTIONS = process.env.GITHUB_ACTIONS === 'true';
+const annotate = (level: 'notice' | 'error', title: string, msg: string) => {
+  if (ACTIONS) console.log(`::${level} title=${title}::${msg.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')}`);
+};
+const fail = (msg: string): never => { console.error(msg); annotate('error', 'SLA claim', msg); process.exit(1); };
 // Bad names, a full roster, an expired login: one line, not a stack trace.
 process.on('uncaughtException', error => fail(error.message));
 
@@ -55,10 +62,22 @@ const open = openSpots(ctx);
 if (open > 0 && dropping) log(`You have ${open} open roster spot${open === 1 ? '' : 's'}; ${dropping.name} will still be dropped.`);
 if (bid && !ctx.budget) log('This league has no FAAB budget; the bid is ignored.');
 
+const maxMinutes = Number(values['max-minutes'] ?? 0);
 const outcome = await runClaim(
-  { league: league.id, add: target.id, drop: dropping?.playerId ?? null, bid, keepPriority: values['keep-priority']!, watch: values.watch!, pollMs: Number(values.poll ?? 30) * 1000 },
+  {
+    league: league.id, add: target.id, drop: dropping?.playerId ?? null, bid, keepPriority: values['keep-priority']!, watch: values.watch!,
+    pollMs: Number(values.poll ?? 30) * 1000, deadline: maxMinutes > 0 ? Date.now() + maxMinutes * 60_000 : undefined,
+  },
   { log, execute: values.execute! },
 );
+if (outcome.kind === 'not-yet' && outcome.continuing) {
+  log(`${outcome.message} Out of time for this run.`);
+  annotate('notice', 'SLA claim continuing', outcome.message);
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, 'continue=true\n');
+  process.exit(0);
+}
 if (outcome.kind === 'not-yet') log(`${outcome.message} Run with --watch to ${outcome.until ? 'add them then' : 'grab them when they\'re dropped'}.`);
 else log(outcome.message);
+if (outcome.ok) annotate('notice', 'SLA claim', outcome.message);
+else annotate('error', 'SLA claim', outcome.message);
 process.exit(outcome.ok ? 0 : 1);

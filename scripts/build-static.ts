@@ -11,7 +11,8 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { refreshesSettled } from '../server/cache.ts';
-import { configuredEspnLeagues } from '../server/espn.ts';
+import { claimSnapshot } from '../server/claims.ts';
+import { configuredEspnLeagues, isEspnId } from '../server/espn.ts';
 import { getCore, refreshCore, type LeagueCore } from '../server/league.ts';
 import { recordSnapshot, SNAPSHOT_DIR, trackRecord } from '../server/snapshots.ts';
 import * as views from '../server/views.ts';
@@ -80,7 +81,12 @@ async function buildLeague(id: string): Promise<{ name: string; files: number }>
     await put(`lineup-${t.rosterId}.json`, await views.lineup(id, t.rosterId));
     await put(`waivers-${t.rosterId}.json`, await views.waivers(id, t.rosterId));
   }
-  for (const pid of playerIds(core)) await put(`players/${pid}.json`, await views.player(id, pid));
+  const pids = playerIds(core);
+  for (const pid of pids) await put(`players/${pid}.json`, await views.player(id, pid));
+  // ESPN claims from the static site: what the claim panel needs; the move itself runs in GitHub Actions.
+  if (isEspnId(id)) {
+    await claimSnapshot(id, pids).then(snap => put('claims.json', snap), error => console.warn(`  claim data unavailable for ${id}:`, (error as Error).message));
+  }
   // Bootstrap last: it carries the build stamp the app uses to fetch everything above.
   await put('bootstrap.json', await views.bootstrap(id));
   await write(path.join(dir, 'files.json'), files);

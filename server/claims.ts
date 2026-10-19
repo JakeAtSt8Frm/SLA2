@@ -9,7 +9,7 @@ import { rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getCore, type LeagueCore } from './league.ts';
 import { espnIdIndex, isEspnId, PRO_TEAMS, type EspnIdIndex } from './espn.ts';
-import { hasPendingClaim, moveContext, nextStep, openSpots, playerStates, runClaim, type ClaimPhase } from './espn-moves.ts';
+import { hasPendingClaim, moveContext, nextStep, openSpots, playerStates, runClaim, waiverWire, type ClaimPhase } from './espn-moves.ts';
 import { HttpError, waivers } from './views.ts';
 
 const FILE = process.env.SLA_CLAIMS_FILE ?? path.resolve(import.meta.dirname, '..', 'data', 'claims.json');
@@ -89,10 +89,14 @@ function finish(j: ClaimJob, status: ClaimJob['status'], message: string) {
   console.log(`[claims] ${j.add.name}: ${message}`);
 }
 
-load();
-// Resume watches the last run left active. A send cut off mid-way is safe: the loop re-reads the
-// league first, and never places a second waiver claim for the same player.
-for (const j of jobs.values()) if (j.status === 'active') start(j);
+/**
+ * Called once by the server: resume watches the last run left active. A send cut off mid-way is
+ * safe: the loop re-reads the league first, and never places a second waiver claim for the same player.
+ */
+export function resumeClaims() {
+  load();
+  for (const j of jobs.values()) if (j.status === 'active') start(j);
+}
 
 const leagueJobs = (league: string) => [...jobs.values()].filter(j => j.league === league).sort((a, b) =>
   Number(b.status === 'active') - Number(a.status === 'active') || b.createdAt - a.createdAt);
@@ -144,8 +148,33 @@ export async function claimInfo(id: string, pid: string | null) {
     };
   }
   return {
+    mode: 'server' as 'server' | 'github', asOf: null as string | null,
     dryRun: DRY_RUN, teamId: ctx.teamId, teamName: ctx.teamName, freeAgency: ctx.freeAgency, budget: ctx.budget,
     rosterLimit: ctx.rosterLimit, openSpots: openSpots(ctx), roster, target, jobs: leagueJobs(id),
+  };
+}
+
+/**
+ * What the GitHub Pages app needs to set up a claim without a server (scripts/build-static.ts):
+ * your roster and room, ESPN ids for every player it can open, who is on waivers, suggested drops.
+ * The claim itself runs in GitHub Actions (.github/workflows/claim.yml), which re-checks it all live.
+ */
+export async function claimSnapshot(id: string, pids: string[]) {
+  espnOnly(id);
+  const [ctx, core, index] = await Promise.all([moveContext(id), getCore(id), espnIdIndex(id)]);
+  const [wire, w] = await Promise.all([waiverWire(ctx), waivers(id, ctx.teamId)]);
+  const roster = ctx.roster.map(r => ({ espnId: r.playerId, pid: pidOf(index, r.playerId), name: r.name, slot: slotLabel(r.slot) }));
+  const espnIds: Record<string, number> = {};
+  for (const pid of pids) { try { espnIds[pid] = espnIdOf(core, index, pid); } catch { /* not an ESPN player */ } }
+  const suggestedDrops: Record<string, number> = {};
+  for (const r of w.recommendations) {
+    const drop = r.drop ? roster.find(x => x.pid === r.drop!.id) : undefined;
+    if (drop) suggestedDrops[r.id] = drop.espnId;
+  }
+  return {
+    builtAt: new Date().toISOString(), teamId: ctx.teamId, teamName: ctx.teamName, freeAgency: ctx.freeAgency, budget: ctx.budget,
+    rosterLimit: ctx.rosterLimit, openSpots: openSpots(ctx), roster, espnIds, suggestedDrops,
+    waivers: Object.fromEntries(wire.map(p => [String(p.id), p.waiverProcessDate])) as Record<string, number | null>,
   };
 }
 

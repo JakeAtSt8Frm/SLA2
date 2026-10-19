@@ -70,6 +70,8 @@ jobs:
         env:
           SLA_BASE: ${{ steps.pages.outputs.base_path }}/
           SLA_SITE_URL: ${{ steps.pages.outputs.base_url }}
+          # ESPN claims from the site run as .github/workflows/claim.yml in this repository.
+          VITE_GITHUB_REPO: ${{ github.repository }}
           # Optional: ESPN cookies as repository secrets instead of config/espn.json.
           ESPN_SWID: ${{ secrets.ESPN_SWID }}
           ESPN_S2: ${{ secrets.ESPN_S2 }}
