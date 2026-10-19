@@ -4,7 +4,7 @@ type GitHub = typeof import('../web/src/lib/github.ts');
 let gh: GitHub;
 let startedId = '';
 const calls: { url: string; init?: RequestInit }[] = [];
-let respond: (url: string, init?: RequestInit) => { status: number; body?: unknown } = () => ({ status: 404 });
+let respond: (url: string, init?: RequestInit) => { status: number; body?: unknown; headers?: Record<string, string> } = () => ({ status: 404 });
 
 beforeAll(async () => {
   vi.stubEnv('VITE_GITHUB_REPO', 'owner/repo');
@@ -13,7 +13,7 @@ beforeAll(async () => {
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     calls.push({ url, init });
     const r = respond(url, init);
-    return new Response(r.body === undefined ? null : JSON.stringify(r.body), { status: r.status });
+    return new Response(r.body === undefined ? null : JSON.stringify(r.body), { status: r.status, headers: r.headers });
   });
   gh = await import('../web/src/lib/github.ts');
   gh.setToken('github_pat_test');
@@ -108,6 +108,37 @@ describe('ESPN claims from the static site (GitHub Actions)', () => {
     respond = () => ({ status: 401 });
     await expect(gh.listClaims('espn-1')).rejects.toThrow(/rejected the token/);
     respond = () => ({ status: 403, body: { message: 'Resource not accessible by personal access token' } });
-    await expect(gh.listClaims('espn-1')).rejects.toThrow(/Actions: Read and write/);
+    await expect(gh.startClaim({ league: 'espn-1', add: 1, addName: 'X', drop: null, bid: 0, keepPriority: false, watch: false }))
+      .rejects.toThrow(/refused to start the job \(403\)\. GitHub said: “Resource not accessible by personal access token”/);
+  });
+
+  describe('Check token', () => {
+    const repoUrl = '/repos/owner/repo/actions/workflows/claim.yml/runs';
+    const setup = (o: { user?: number; login?: string; scopes?: string; runs?: number; probe?: number }) => {
+      respond = (url, init) => {
+        if (url.endsWith('/user')) return { status: o.user ?? 200, body: { login: o.login ?? 'owner' }, headers: o.scopes === undefined ? {} as Record<string, string> : { 'X-OAuth-Scopes': o.scopes } };
+        if (url.includes(repoUrl)) return { status: o.runs ?? 200, body: { workflow_runs: [{ id: 5 }] } };
+        if (url.endsWith('/runs/5/cancel') && init?.method === 'POST') return { status: o.probe ?? 409, body: { message: 'Cannot cancel a workflow run that is completed.' } };
+        return { status: 404 };
+      };
+    };
+    it('passes when GitHub refuses to cancel a finished run because it is finished', async () => {
+      setup({});
+      expect(await gh.checkToken()).toMatchObject({ ok: true, message: expect.stringMatching(/can start and cancel/) });
+    });
+    it('names the missing Actions permission on a fine-grained token', async () => {
+      setup({ probe: 403 });
+      expect(await gh.checkToken()).toMatchObject({ ok: false, message: expect.stringMatching(/Actions must be “Read and write”/) });
+    });
+    it('names the missing scope on a classic token', async () => {
+      setup({ probe: 404, scopes: 'read:user' });
+      expect(await gh.checkToken()).toMatchObject({ ok: false, message: expect.stringMatching(/classic token with scopes “read:user”/) });
+    });
+    it('spots a token from another account, and a dead token', async () => {
+      setup({ login: 'someone-else' });
+      expect((await gh.checkToken()).message).toMatch(/belongs to someone-else/);
+      setup({ user: 401 });
+      expect((await gh.checkToken()).message).toMatch(/doesn’t accept this token/);
+    });
   });
 });

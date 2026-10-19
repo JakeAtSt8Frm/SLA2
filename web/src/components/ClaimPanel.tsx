@@ -1,9 +1,9 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Ban, CircleCheck, CircleX, ExternalLink, LoaderCircle } from 'lucide-react';
 import { CLAIMS_AVAILABLE, STATIC, useCancelClaim, useClaimInfo, useStartClaim, type ClaimInfoView, type ClaimJobView } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { ago, kickoff } from '../lib/format.ts';
-import { getToken, githubRepo, runsUrl, setToken, subscribeToken, tokenHelpUrl } from '../lib/github.ts';
+import { checkToken, getToken, githubRepo, runsUrl, setToken, subscribeToken, tokenHelpUrl, tokenSettingsUrl } from '../lib/github.ts';
 import { Button, Card, Empty, Notice, Skeleton, cx } from './ui.tsx';
 
 const PHASES: Record<NonNullable<ClaimJobView['phase']>, string> = {
@@ -103,6 +103,7 @@ function ClaimForm({ pid, initialDrop, player, token }: { pid: string; initialDr
             <div className="rounded-[10px] border border-line-strong bg-surface-2 p-3">
               <p className="text-[13px] text-ink">{question}</p>
               {start.isError && <p className="mt-2 text-[12px] text-bad-ink">{(start.error as Error).message}</p>}
+              {start.isError && github && <TokenCheck auto />}
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button variant="primary" onClick={submit} disabled={start.isPending}>{start.isPending ? 'Starting…' : `Confirm: ${action.toLowerCase()}`}</Button>
                 <Button variant="ghost" onClick={() => setConfirming(false)} disabled={start.isPending}>Back</Button>
@@ -127,8 +128,23 @@ function Footnote({ github }: { github: boolean }) {
     <p className="text-[11px] leading-relaxed text-ink-3">
       Runs as a GitHub Actions job in {githubRepo} with the ESPN login there, and re-checks the player live before moving. Jobs usually start within a minute; a watch keeps going in fresh runs until it’s done or you cancel it.{' '}
       <a href={runsUrl} target="_blank" rel="noreferrer" className="underline hover:text-ink">Runs on GitHub</a>{' · '}
+      <a href={tokenSettingsUrl} target="_blank" rel="noreferrer" className="underline hover:text-ink">Your tokens</a>{' · '}
       <button className="underline hover:text-ink" onClick={() => setToken(null)}>Forget token</button>
+      <TokenCheck />
     </p>
+  );
+}
+
+/** Says what the saved token is missing, without starting anything. */
+function TokenCheck({ auto = false }: { auto?: boolean }) {
+  const [state, setState] = useState<{ ok: boolean; message: string } | 'checking' | null>(null);
+  const run = () => { setState('checking'); checkToken().then(setState, (error: Error) => setState({ ok: false, message: error.message })); };
+  useEffect(() => { if (auto) run(); }, [auto]);
+  return (
+    <span className="mt-2 block">
+      <Button size="sm" onClick={run} disabled={state === 'checking'}>{state === 'checking' ? 'Checking…' : 'Check token'}</Button>
+      {state && state !== 'checking' && <span className={cx('mt-1.5 block text-[12px] leading-relaxed', state.ok ? 'text-good-ink' : 'text-bad-ink')}>{state.message}</span>}
+    </span>
   );
 }
 
@@ -141,8 +157,8 @@ function TokenSetup() {
       <p>To add or claim ESPN players from this site, it starts a job on GitHub that makes the move with the ESPN login there. That needs a GitHub token, once per device:</p>
       <ol className="list-decimal space-y-1 pl-5 text-[12px]">
         <li>Open <a href={tokenHelpUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline hover:text-ink">a new fine-grained token on GitHub<ExternalLink size={11} aria-hidden /></a>.</li>
-        <li>Repository access: <b>Only select repositories</b> → <b>{githubRepo.split('/')[1] ?? githubRepo}</b>.</li>
-        <li>Permissions → Repository permissions → <b>Actions: Read and write</b>.</li>
+        <li>Resource owner: <b>{githubRepo.split('/')[0]}</b>. Repository access: <b>Only select repositories</b> → <b>{githubRepo.split('/')[1] ?? githubRepo}</b> (not “Public repositories”, which is read-only).</li>
+        <li>Permissions → Repository permissions → <b>Actions</b> → change it to <b>Read and write</b>.</li>
         <li>Generate it, copy it, and paste it here.</li>
       </ol>
       <div className="flex flex-wrap gap-2">

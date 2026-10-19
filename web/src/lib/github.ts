@@ -25,26 +25,67 @@ export const subscribeToken = (listener: () => void) => { tokenListeners.add(lis
 
 export class GitHubError extends Error {}
 
-async function gh<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function call(path: string, init: RequestInit = {}): Promise<Response> {
   const token = getToken();
   if (!token) throw new GitHubError('Add your GitHub token first.');
-  let res: Response;
   try {
-    res = await fetch(`${API}${path}`, {
+    return await fetch(`${API}${path}`, {
       ...init,
       headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', Authorization: `Bearer ${token}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
     });
   } catch {
     throw new GitHubError('Can’t reach GitHub. Check your connection.');
   }
+}
+
+async function gh<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await call(path, init);
   if (res.status === 401) throw new GitHubError('GitHub rejected the token (expired or mistyped). Paste a new one.');
-  if (res.status === 403 || res.status === 404) {
+  if (!res.ok) {
     const body = await res.json().catch(() => null) as { message?: string } | null;
-    throw new GitHubError(/rate limit/i.test(body?.message ?? '') ? 'GitHub rate limit reached. Try again in a few minutes.'
-      : `This token can’t run workflows on ${REPO}. Give it “Actions: Read and write” access to that repository.`);
+    const said = body?.message ? ` GitHub said: “${body.message}”.` : '';
+    if (/rate limit/i.test(body?.message ?? '')) throw new GitHubError('GitHub rate limit reached. Try again in a few minutes.');
+    if (res.status === 403 || res.status === 404) {
+      throw new GitHubError(init.method === 'POST'
+        ? `GitHub refused to ${path.endsWith('/cancel') ? 'cancel' : 'start'} the job (${res.status}).${said} Use Check token below to see what the token is missing.`
+        : `GitHub refused to list the claim jobs (${res.status}).${said}`);
+    }
+    throw new GitHubError(`GitHub error ${res.status}.${said}`);
   }
-  if (!res.ok) throw new GitHubError(`GitHub error ${res.status}`);
   return (res.status === 204 || res.status === 202 ? null : await res.json()) as T;
+}
+
+export const tokenSettingsUrl = 'https://github.com/settings/personal-access-tokens';
+
+/**
+ * What the saved token can do, found without side effects: who it belongs to, and whether it may run
+ * this repository's Actions (asking to cancel a finished run is refused with 409 when it may, 403 when not).
+ */
+export async function checkToken(): Promise<{ ok: boolean; message: string }> {
+  const owner = REPO.split('/')[0];
+  const me = await call('/user');
+  if (me.status === 401) return { ok: false, message: 'GitHub doesn’t accept this token: it’s mistyped, expired or revoked. Create a new one and paste it again.' };
+  const login = me.ok ? ((await me.json()) as { login?: string }).login ?? null : null;
+  // Only classic tokens report scopes; fine-grained tokens send no such header.
+  const scopes = me.headers.get('X-OAuth-Scopes');
+  if (login && login.toLowerCase() !== owner.toLowerCase()) {
+    return { ok: false, message: `This token belongs to ${login}, but the claim jobs run in ${REPO}. Create the token while signed in as ${owner}.` };
+  }
+  const runs = await call(`/repos/${REPO}/actions/workflows/${WORKFLOW}/runs?per_page=1&status=completed`);
+  if (!runs.ok) {
+    return { ok: false, message: `This token can’t see ${REPO}’s Actions (${runs.status}). Edit it: Repository access → Only select repositories → ${REPO.split('/')[1]}.` };
+  }
+  const finished = ((await runs.json()) as { workflow_runs: { id: number }[] }).workflow_runs[0];
+  if (!finished) return { ok: true, message: 'The token can see the repository. Its Actions permission can be confirmed after the first claim runs.' };
+  const probe = await call(`/repos/${REPO}/actions/runs/${finished.id}/cancel`, { method: 'POST' });
+  if (probe.status === 409 || probe.ok) return { ok: true, message: `The token works: it can start and cancel claim jobs in ${REPO}.` };
+  if (scopes !== null) {
+    return { ok: false, message: `This is a classic token with scopes “${scopes || 'none'}”. It needs the “repo” scope, or use a fine-grained token with Actions: Read and write on ${REPO.split('/')[1]}.` };
+  }
+  return {
+    ok: false,
+    message: `The token can read ${REPO} but can’t run its Actions (${probe.status}). Open the token on GitHub → Edit: Repository access must be “Only select repositories” with ${REPO.split('/')[1]}, and Repository permissions → Actions must be “Read and write” (not “Read-only”). Save on GitHub; this same token then works without pasting it again.`,
+  };
 }
 
 export interface ClaimDispatch {
