@@ -3,24 +3,38 @@ import { ArrowRight, Search, TrendingUp } from 'lucide-react';
 import { CLAIMS_AVAILABLE, useWaivers, type Waivers } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { fmt, pct, posLabel } from '../lib/format.ts';
-import { Button, Card, CardHeader, Empty, ErrorState, InfoTip, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Segmented, Stat, cx, useSort } from '../components/ui.tsx';
+import { useSearchParam } from '../lib/router.ts';
+import { Button, Card, CardHeader, Empty, ErrorState, InfoTip, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Segmented, Select, Stat, cx, useSort } from '../components/ui.tsx';
 import { Sparkline } from '../charts/charts.tsx';
 import { AutoClaims } from '../components/ClaimPanel.tsx';
+
+type Ready = Extract<Waivers, { week: number }>;
+type Row = Ready['freeAgents'][number];
+
+/** The week the tables show. A past week shows what players scored; the others show forecasts. */
+interface Shown { week: number; current: number; past: boolean; label: string }
+
+/** Points from a season line's [week, points] pairs, or null if he didn't play that week. */
+const pointsIn = (weeks: number[][] | undefined, week: number) => weeks?.find(([w]) => w === week)?.[1] ?? null;
 
 export default function WaiversPage() {
   const { leagueId, myTeamId, teamName, boot, teams } = useApp();
   const q = useWaivers(leagueId, myTeamId);
+  const [weekParam, setWeek] = useSearchParam('week');
   const mode = boot.league.waiverMode;
   const priority = myTeamId !== null ? teams.get(myTeamId)?.waiverPosition : undefined;
   if (q.isPending) return <PageSkeleton />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   const w = q.data;
   if (w.week === null) return <Empty title="The season is over" />;
+  const week = w.weeks.includes(Number(weekParam)) ? Number(weekParam) : w.week;
+  const shown: Shown = { week, current: w.week, past: week < w.week, label: week === w.week ? 'This week' : `Wk ${week}` };
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow={`Week ${w.week} · ${teamName(myTeamId)}`}
         title="Waiver wire"
+        right={<Select label="Week" value={week} onChange={v => setWeek(v === w.week ? null : String(v), true)} options={w.weeks.map(x => ({ value: x, label: `Week ${x}${x === w.week ? ' (current)' : ''}` }))} className="w-44" />}
       />
       <Card>
         <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
@@ -33,20 +47,27 @@ export default function WaiversPage() {
         </div>
       </Card>
       <AutoClaims />
-      <FreeAgents rows={w.freeAgents} total={w.availableCount} />
-      <Recommendations recs={w.recommendations} faab={mode === 'faab'} />
+      <FreeAgents rows={w.freeAgents} total={w.availableCount} shown={shown} weeks={w.weeks} opponents={w.opponents} />
+      <Recommendations recs={w.recommendations} faab={mode === 'faab'} shown={shown} horizon={w.horizon} />
     </div>
   );
 }
 
-function Recommendations({ recs, faab }: { recs: Waivers['recommendations']; faab: boolean }) {
+function Recommendations({ recs, faab, shown: s, horizon }: { recs: Ready['recommendations']; faab: boolean; shown: Shown; horizon: number[] }) {
   const { boot, openPlayer } = useApp();
   const claimable = boot.league.platform === 'espn' && CLAIMS_AVAILABLE;
   const [shown, setShown] = useState(10);
   if (!recs.length) return <Card><Empty title="No free agent improves your lineup">Your roster is deeper than the wire at every slot. Nice.</Empty></Card>;
+  const h = horizon.indexOf(s.week);
+  // A past week shows what he scored; a coming week, what he adds to your best lineup that week.
+  const weekValue = (r: Ready['recommendations'][number]) => {
+    if (s.past) return fmt(pointsIn(r.player.season?.weeks, s.week));
+    const gain = r.weekGains[h] ?? 0;
+    return gain > 0.05 ? `+${fmt(gain)}` : '—';
+  };
   return (
     <Card>
-      <CardHeader title="Top pickups for you" right={<InfoTip>{`Net gain = sum of weekly best-lineup improvements with the pickup over the rest of the season, after dropping the suggested player.${boot.league.isDynasty ? ' Drop suggestions weigh both lineup impact and dynasty value, so young upside players aren’t cut for a one-week rental.' : ''}`}</InfoTip>} />
+      <CardHeader title="Top pickups for you" right={<InfoTip>{`Net gain = sum of weekly best-lineup improvements with the pickup over the rest of the season, after dropping the suggested player. The week column is what he adds to your best lineup in the week you picked (points scored, for a past week).${boot.league.isDynasty ? ' Drop suggestions weigh both lineup impact and dynasty value, so young upside players aren’t cut for a one-week rental.' : ''}`}</InfoTip>} />
       <div className="space-y-3">
         {recs.slice(0, shown).map((r, i) => (
           <div key={r.id} className="grid grid-cols-1 gap-3 rounded-[12px] border border-line p-3.5 xl:grid-cols-[28px_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1.2fr)] xl:items-center">
@@ -61,7 +82,7 @@ function Recommendations({ recs, faab }: { recs: Waivers['recommendations']; faa
             </div>
             <div className={cx('grid gap-2', faab ? 'grid-cols-3' : 'grid-cols-2')}>
               <div><div className="text-[11px] text-ink-3">Net ROS</div><div className="num text-[17px] font-semibold text-good-ink">+{fmt(r.netGain)}</div></div>
-              <div><div className="text-[11px] text-ink-3">This week</div><div className="num text-[15px] font-semibold">{r.weekGain > 0.05 ? `+${fmt(r.weekGain)}` : '—'}</div></div>
+              <div><div className="text-[11px] text-ink-3">{s.past ? `Wk ${s.week} pts` : s.label}</div><div className="num text-[15px] font-semibold">{weekValue(r)}</div></div>
               {faab && <div><div className="text-[11px] text-ink-3">FAAB</div><div className="num text-[15px] font-semibold">{r.faab ? `$${r.faab.low}–${r.faab.high}` : '—'}</div></div>}
             </div>
             <ul className="space-y-0.5 text-[12px] text-ink-2">
@@ -78,7 +99,7 @@ function Recommendations({ recs, faab }: { recs: Waivers['recommendations']; faa
 const PAGE = 40;
 
 /** Everyone available, first: what a waiver screen should open on. */
-function FreeAgents({ rows, total }: { rows: Waivers['freeAgents']; total: number }) {
+function FreeAgents({ rows, total, shown, weeks, opponents }: { rows: Ready['freeAgents']; total: number; shown: Shown; weeks: number[]; opponents: Ready['opponents'] }) {
   const { boot } = useApp();
   const [pos, setPos] = useState<string>('ALL');
   const [text, setText] = useState('');
@@ -87,13 +108,23 @@ function FreeAgents({ rows, total }: { rows: Waivers['freeAgents']; total: numbe
   const filtered = useMemo(() => rows.filter(r =>
     (pos === 'ALL' || r.pos === pos || r.eligible.includes(pos as never)) &&
     (!query || r.name.toLowerCase().includes(query) || (r.team ?? '').toLowerCase() === query)), [rows, pos, query]);
-  const { sorted, header } = useSort(filtered, { key: 'ros', dir: 'desc' }, {
-    name: r => r.name, gain: r => r.gain, exp: r => r.week?.exp, ros: r => r.value?.rosAvg, ppg: r => r.season?.ppg, last3: r => r.season?.last3, snap: r => r.season?.snap, trend: r => r.trending,
+  const i = weeks.indexOf(shown.week);
+  const opp = (r: Row) => (r.team ? opponents[r.team]?.[i] ?? null : null);
+  const proj = (r: Row) => (opp(r) === 'BYE' ? null : r.proj[i] ?? null);
+  const scored = (r: Row) => pointsIn(r.season?.weeks, shown.week);
+  const { sorted, header, setSort } = useSort(filtered, { key: shown.week === shown.current ? 'ros' : 'wk', dir: 'desc' }, {
+    name: r => r.name, gain: r => r.gain, wk: r => (shown.past ? scored(r) : proj(r)), proj, ros: r => r.value?.rosAvg, ppg: r => r.season?.ppg, last3: r => r.season?.last3, snap: r => r.season?.snap, trend: r => r.trending,
   });
+  // Picking a week sorts the table by it.
+  const [sortedWeek, setSortedWeek] = useState(shown.week);
+  if (sortedWeek !== shown.week) {
+    setSortedWeek(shown.week);
+    setSort({ key: 'wk', dir: 'desc' });
+  }
   return (
     <Card pad={false}>
       <div className="space-y-3 px-4 pt-4 sm:px-5">
-        <CardHeader title="Available players" subtitle={total > rows.length ? `Top ${rows.length} of ${total} free agents who could score this season` : `${total} free agents who could score this season`} />
+        <CardHeader title="Available players" subtitle={`${total > rows.length ? `Top ${rows.length} of ${total} free agents who could score this season` : `${total} free agents who could score this season`}${shown.past ? `, with what they scored in week ${shown.week}` : ''}`} />
         <div className="flex flex-wrap items-center gap-2">
           <label className="relative flex min-w-[200px] flex-1 items-center sm:max-w-xs">
             <Search size={15} className="pointer-events-none absolute left-3 text-ink-3" aria-hidden />
@@ -110,7 +141,8 @@ function FreeAgents({ rows, total }: { rows: Waivers['freeAgents']; total: numbe
               <tr>
                 {header('name', 'Player', 'sticky-col')}
                 {header('gain', <span className="inline-flex items-center gap-1">For you <InfoTip>Rest-of-season points this player adds to your best lineup, after the best drop. Shown for your top 30 pickups.</InfoTip></span>, 'r')}
-                {header('exp', 'This week', 'r')}
+                {shown.past ? <>{header('wk', `Wk ${shown.week} pts`, 'r')}{header('proj', 'Proj', 'r')}</> : header('wk', shown.label, 'r')}
+                <th>Opp</th>
                 {header('ros', 'ROS / wk', 'r')}
                 {header('ppg', 'Season avg', 'r')}
                 {header('last3', 'Last 3', 'r')}
@@ -124,7 +156,9 @@ function FreeAgents({ rows, total }: { rows: Waivers['freeAgents']; total: numbe
                 <tr key={r.id} className="row-hover">
                   <td className="sticky-col"><span className="flex items-center gap-2"><Pos pos={r.pos} /><PlayerLink id={r.id} name={r.name} className="max-w-[130px] sm:max-w-[180px]" /><span className="text-[11px] text-ink-3">{r.team}</span><span className="hidden items-center gap-1 sm:inline-flex"><Ranks ranks={r.ranks} /></span><Injury status={r.injury} /></span></td>
                   <td className={cx('r', r.gain ? 'font-semibold text-good-ink' : 'text-ink-3')}>{r.gain ? `+${fmt(r.gain)}` : '—'}</td>
-                  <td className="r font-semibold">{r.week ? (r.week.bye ? 'BYE' : fmt(r.week.exp)) : '—'}</td>
+                  <td className="r font-semibold">{fmt(shown.past ? scored(r) : proj(r))}</td>
+                  {shown.past && <td className="r text-ink-2">{fmt(proj(r))}</td>}
+                  <td className="whitespace-nowrap text-ink-2">{opp(r) ?? '—'}</td>
                   <td className="r">{fmt(r.value?.rosAvg)}</td>
                   <td className="r text-ink-2">{fmt(r.season?.ppg)}</td>
                   <td className="r text-ink-2">{fmt(r.season?.last3)}</td>

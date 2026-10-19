@@ -515,16 +515,42 @@ export async function transactions(id: string) {
   return once(core, 'transactions', () => ({ transactions: transactionsView(core) }));
 }
 
+/**
+ * Every week of the fantasy season for the waiver wire's week picker, the same for every team:
+ * each free agent's forecast by week (the pregame one for past weeks; points scored come from
+ * the season line), and each NFL team's opponent by week ('BYE', or null when not scheduled yet).
+ */
+function waiverWeeks(core: LeagueCore, freeAgents: readonly string[]) {
+  return once(core, 'waiverWeeks', () => {
+    const weeks = Array.from({ length: core.lastWeek }, (_, i) => i + 1);
+    const scheduled = new Set(core.games.map(g => g.week));
+    const opponents: Record<string, (string | null)[]> = {};
+    for (const team of new Set(freeAgents.map(pid => core.players[pid].team!))) {
+      opponents[team] = weeks.map(w => {
+        const g = core.gameFor(team, w);
+        return g ? (g.home === team ? `vs ${g.away}` : `@ ${g.home}`) : scheduled.has(w) ? 'BYE' : null;
+      });
+    }
+    const proj = new Map(freeAgents.map(pid => [pid, weeks.map(w => {
+      const exp = w < core.week! ? core.pregame(pid, w)?.exp : core.forecasts.get(w)?.get(pid)?.expected;
+      return exp === undefined ? null : r1(exp);
+    })]));
+    return { weeks, opponents, proj };
+  });
+}
+
 export async function waivers(id: string, rosterId: number) {
   const core = await getCore(id);
   const t = core.teams.find(x => x.rosterId === rosterId);
   if (!t) throw new HttpError(404, 'Team not found');
-  if (core.week === null) return { week: null, recommendations: [], freeAgents: [] };
+  const week = core.week;
+  if (week === null) return { week: null, recommendations: [], freeAgents: [] };
   return once(core, `waivers:${rosterId}`, () => {
     const benchSlots = core.league.rosterPositions.filter(s => s === 'BN').length;
     const active = t.roster.players.filter(pid => !core.taxiOrIr.has(pid));
     const rostered = new Set(core.ownerOf.keys());
     const freeAgents = core.relevant.filter(pid => !rostered.has(pid) && core.players[pid]?.team);
+    const byWeek = waiverWeeks(core, freeAgents);
     const recs = waiverRecommendations({
       roster: active,
       starters: core.advice.get(rosterId)?.current.ids.map(x => x ?? '') ?? t.roster.starters,
@@ -533,7 +559,7 @@ export async function waivers(id: string, rosterId: number) {
       players: core.players,
       forecasts: core.forecasts,
       weeks: core.horizon,
-      currentWeek: core.week!,
+      currentWeek: week,
       freeAgents,
       otherRosters: core.teams.filter(x => x.rosterId !== rosterId).map(x => x.roster.players.filter(pid => !core.taxiOrIr.has(pid))),
       faabRemaining: Math.max(0, core.league.waiverBudget - t.roster.faabUsed),
@@ -545,17 +571,20 @@ export async function waivers(id: string, rosterId: number) {
     });
     // Everyone available who could plausibly matter: forecast to score, or has scored this season.
     const gainOf = new Map(recs.map(r => [r.id, r]));
-    const fa = freeAgents.map(pid => ({ ...listRow(core, pid), gain: gainOf.has(pid) ? r1(gainOf.get(pid)!.netGain) : null }))
+    const fa = freeAgents.map(pid => ({ ...listRow(core, pid), gain: gainOf.has(pid) ? r1(gainOf.get(pid)!.netGain) : null, proj: byWeek.proj.get(pid)! }))
       .filter(r => (r.week?.exp ?? 0) > 0.3 || (r.value?.rosAvg ?? 0) > 0.5 || (r.season?.ppg ?? 0) > 2)
       .sort((a, b) => (b.value?.rosAvg ?? 0) - (a.value?.rosAvg ?? 0));
     return {
-      week: core.week,
+      week,
       rosterCount: active.length,
       rosterLimit: core.slots.length + benchSlots,
       faabRemaining: Math.max(0, core.league.waiverBudget - t.roster.faabUsed),
       horizon: core.horizon,
+      /** Weeks the page can show; `proj` and `opponents` follow this order. */
+      weeks: byWeek.weeks,
+      opponents: byWeek.opponents,
       recommendations: recs.map(r => ({
-        ...r, weekGain: r2(r.weekGain), rosGain: r1(r.rosGain), dropCost: r1(r.dropCost), netGain: r1(r.netGain),
+        ...r, weekGain: r2(r.weekGain), weekGains: r.weekGains.map(r2), rosGain: r1(r.rosGain), dropCost: r1(r.dropCost), netGain: r1(r.netGain),
         player: playerRow(core, r.id), drop: r.dropId ? playerRow(core, r.dropId) : null,
       })),
       availableCount: fa.length,

@@ -34,6 +34,7 @@ describe('legal waiver gains', () => {
     const [recommendation] = waiverRecommendations(args);
     expect(recommendation).toBeDefined();
     expect(recommendation.weekGain).toBe(0);
+    expect(recommendation.weekGains).toEqual([0, 10]);
     expect(recommendation.startWeeks).toEqual([4]);
     expect(recommendation.netGain).toBeCloseTo(9.2);
   });

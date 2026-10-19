@@ -12,6 +12,8 @@ export interface WaiverRecommendation {
   id: string;
   /** Expected-point gain to your best lineup this week (0 if his game already started). */
   weekGain: number;
+  /** The same gain in each week of the horizon, in `weeks` order (before any drop). */
+  weekGains: number[];
   /** Discounted sum of weekly lineup gains over the horizon. */
   rosGain: number;
   /** Weeks within the horizon where he would start for you. */
@@ -129,12 +131,13 @@ export function waiverRecommendations(a: Args): WaiverRecommendation[] {
   for (const c of candidates) {
     const withAdd = [...a.roster, c.id];
     let rosGain = 0, weekGain = 0;
-    const startWeeks: number[] = [];
+    const startWeeks: number[] = [], weekGains: number[] = [];
     // Starters the pickup pushes out of the lineup: always worth testing as the drop.
     const displaced = new Set<string>();
     for (const w of a.weeks) {
       const after = lineup(withAdd, w);
       const g = after.total - base.get(w)!;
+      weekGains.push(g);
       if (g > 0.05) {
         startWeeks.push(w);
         const inAfter = new Set(after.ids);
@@ -162,7 +165,7 @@ export function waiverRecommendations(a: Args): WaiverRecommendation[] {
       }
       if (dropId === null || netGain <= 0.05) continue;
     }
-    recs.push({ id: c.id, weekGain, rosGain, startWeeks, dropId, dropCost, netGain, competition: 0, faab: null, reasons: [] });
+    recs.push({ id: c.id, weekGain, weekGains, rosGain, startWeeks, dropId, dropCost, netGain, competition: 0, faab: null, reasons: [] });
   }
   recs.sort((x, y) => y.netGain - x.netGain);
   const top = recs.slice(0, a.limit ?? 25);

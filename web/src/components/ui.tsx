@@ -320,7 +320,7 @@ export function useSort<T>(rows: T[], initial: { key: string; dir: 'asc' | 'desc
       </button>
     </th>
   );
-  return { sorted, header, sort };
+  return { sorted, header, sort, setSort };
 }
 
 // Counted, so dialogs that open and close out of order can't leave the page unscrollable.
