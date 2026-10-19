@@ -47,7 +47,7 @@ export const validEspnId = (id: string) => {
   return !!m && config.leagues.some(l => l.id === m[1]);
 };
 
-async function resolve(id: string): Promise<{ leagueId: string; season: number; current: boolean }> {
+export async function resolve(id: string): Promise<{ leagueId: string; season: number; current: boolean }> {
   const m = ID_PATTERN.exec(id);
   if (!m) throw Object.assign(new Error(`Bad ESPN league id ${id}`), { status: 404, permanent: true });
   const state = await sleeper.state();
@@ -64,13 +64,15 @@ const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const num = (v: unknown, fallback = 0): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim().length > 0 ? v.trim() : null);
 
-async function espnJson(route: string): Promise<unknown> {
+/** `filter` narrows player lists (ESPN's X-Fantasy-Filter header). */
+export async function espnJson(route: string, filter?: unknown): Promise<unknown> {
   if (!config.swid || !config.espnS2) throw Object.assign(new Error('ESPN credentials are not configured.'), { status: 503, permanent: true });
   const headers = {
     Cookie: `SWID=${config.swid}; espn_s2=${config.espnS2}`,
     Accept: 'application/json',
     // ESPN serves a smaller payload to clients it doesn't recognise.
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    ...(filter === undefined ? {} : { 'X-Fantasy-Filter': JSON.stringify(filter) }),
   };
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -89,6 +91,34 @@ async function espnJson(route: string): Promise<unknown> {
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+const WRITE_HOST = 'https://lm-api-writes.fantasy.espn.com/apis/v3/games/ffl';
+
+/**
+ * One POST to ESPN's write host (roster moves; see server/espn-moves.ts). Never retried: a request
+ * that timed out may still have executed, so callers re-read the league instead.
+ */
+export async function espnWrite(route: string, body: Raw): Promise<{ status: number; body: unknown }> {
+  if (!config.swid || !config.espnS2) throw Object.assign(new Error('ESPN credentials are not configured.'), { status: 503, permanent: true });
+  const res = await fetch(`${WRITE_HOST}${route}`, {
+    method: 'POST',
+    headers: {
+      Cookie: `SWID=${config.swid}; espn_s2=${config.espnS2}`,
+      Accept: 'application/json', 'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      'X-Fantasy-Source': 'kona', 'X-Fantasy-Platform': 'kona-PROD',
+    },
+    body: JSON.stringify({ ...body, memberId: config.swid }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const text = await res.text();
+  let parsed: unknown = text;
+  try { parsed = JSON.parse(text); } catch { /* ESPN error pages aren't always JSON */ }
+  return { status: res.status, body: parsed };
+}
+
+/** The saved login's own team. A commissioner's login can edit any team, so moves must check this. */
+export const ownsTeam = (team: unknown) => arr(obj(team).owners).includes(config.swid);
+
 /** Current seasons use the seasons route; older ones are only served from leagueHistory. */
 async function leagueRaw(leagueId: string, season: number, views: string[], extra = ''): Promise<Raw> {
   const q = views.map(v => `view=${v}`).join('&') + extra;
@@ -106,12 +136,12 @@ async function leagueRaw(leagueId: string, season: number, views: string[], extr
 // ─── Tables ──────────────────────────────────────────────────────────────────
 
 /** ESPN pro team id → Sleeper team code. */
-const PRO_TEAMS: Record<number, string> = {
+export const PRO_TEAMS: Record<number, string> = {
   1: 'ATL', 2: 'BUF', 3: 'CHI', 4: 'CIN', 5: 'CLE', 6: 'DAL', 7: 'DEN', 8: 'DET', 9: 'GB', 10: 'TEN', 11: 'IND', 12: 'KC',
   13: 'LV', 14: 'LAR', 15: 'MIA', 16: 'MIN', 17: 'NE', 18: 'NO', 19: 'NYG', 20: 'NYJ', 21: 'PHI', 22: 'ARI', 23: 'PIT',
   24: 'LAC', 25: 'SF', 26: 'SEA', 27: 'TB', 28: 'WAS', 29: 'CAR', 30: 'JAX', 33: 'BAL', 34: 'HOU',
 };
-const POSITIONS: Record<number, Pos> = { 1: 'QB', 2: 'RB', 3: 'WR', 4: 'TE', 5: 'K', 16: 'DEF', 9: 'DL', 10: 'DL', 11: 'LB', 12: 'DB', 13: 'DB', 14: 'DL', 15: 'LB' };
+export const POSITIONS: Record<number, Pos> = { 1: 'QB', 2: 'RB', 3: 'WR', 4: 'TE', 5: 'K', 16: 'DEF', 9: 'DL', 10: 'DL', 11: 'LB', 12: 'DB', 13: 'DB', 14: 'DL', 15: 'LB' };
 
 /** ESPN lineup slot → Sleeper slot name. */
 const SLOT_NAMES: Record<number, string> = {
@@ -530,7 +560,7 @@ export async function espnMatchups(id: string, week: number, detail = false): Pr
 // ─── Player directory (names for ids that arrive without one) ───────────────
 
 /** Every active ESPN player's name, position and team — transaction items carry only an id. */
-function directory(season: number): Promise<Record<string, [name: string, pos: number, team: number]>> {
+export function directory(season: number): Promise<Record<string, [name: string, pos: number, team: number]>> {
   return cached(`espn:players:${season}`, 12 * HOUR, async () => {
     const res = await fetch(`${HOST}/seasons/${season}/players?scoringPeriodId=0&view=players_wl`, {
       headers: {
