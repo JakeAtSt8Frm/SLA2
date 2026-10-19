@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FeatureState } from '../engine/features.ts';
-import { pregameForecast, replayForecast, type ForecastEnv } from '../engine/forecast.ts';
+import { pregameForecast, replayForecast, withLiveState, type ForecastEnv } from '../engine/forecast.ts';
 import { ProjectionModel, type ModelFile } from '../engine/model.ts';
 import { compileScoring } from '../engine/scoring.ts';
 import { evaluateTrade, TradeError, type TradeKit } from '../engine/trade.ts';
@@ -70,6 +70,23 @@ describe('live scoring between builds', () => {
     const final = { ...game, final: true } as Game;
     expect(applyLive(final, live, scoring, now)).toBe(final);
   });
+
+  it('updates score ranges with live totals and drops obsolete optimal-lineup odds', () => {
+    const stale = { ...game, optimizedWinProbA: 0.9 };
+    const out = applyLive(stale, live, scoring, now);
+    expect(out.range).not.toBeNull();
+    expect(out.range?.a[1]).toBe(out.a.projected);
+    expect(out.range?.b[1]).toBe(out.b?.projected);
+    expect(out.range?.histogram.a.reduce((sum, n) => sum + n, 0)).toBeCloseTo(1, 3);
+    expect(out.optimizedWinProbA).toBeNull();
+  });
+
+  it('uses kickoff when the browser schedule status lags, preserving points already scored', () => {
+    const lagging = { ...live, status: new Map(live.status).set('BBB', 'pre_game' as const) };
+    const out = applyLive(game, lagging, scoring, now);
+    expect(out.a.lineup[1].points).toBe(6);
+    expect(out.a.lineup[1].forecast?.live?.status).toBe('in_game');
+  });
 });
 
 describe('trade evaluation kit', () => {
@@ -107,6 +124,21 @@ describe('trade evaluation kit', () => {
     expect(() => evaluateTrade(kit, { a: 1, b: 1, aGives: ['wa'], bGives: [] })).toThrow(TradeError);
     expect(() => evaluateTrade(kit, { a: 1, b: 2, aGives: [], bGives: [] })).toThrow(TradeError);
   });
+
+  it('counts the settled current week when a trade takes effect next week', () => {
+    const nextWeek: TradeKit = {
+      ...kit, weeks: [7],
+      teams: kit.teams.map(t => ({ ...t, record: { wins: 0, losses: 0, ties: 0, pointsFor: t.rosterId } })),
+      season: { ...kit.season, playoffTeams: 1 },
+      remaining: [{ week: 6, a: 1, b: 2 }],
+      dists: { ...kit.dists, '1:6': [150, 0], '2:6': [147, 0] },
+      players: Object.fromEntries(Object.entries(kit.players).map(([id, p]) => [id, { ...p, weeks: p.weeks.slice(1) }])),
+    };
+    const result = evaluateTrade(nextWeek, { a: 1, b: 2, aGives: ['wa'], bGives: ['wb'] });
+    expect(result.a.oddsAfter.playoffPct).toBe(1);
+    expect(result.b.oddsAfter.playoffPct).toBe(0);
+    expect(result.a.byWeek.map(w => w.week)).toEqual([7]);
+  });
 });
 
 describe('pregame replay of a past week', () => {
@@ -128,5 +160,13 @@ describe('pregame replay of a past week', () => {
     expect(replay.mean).toBeGreaterThan(5);
     expect(replay.exp).toBeCloseTo(replay.mean * model.playProbability(null, true));
     expect(replay.provider).toBeCloseTo(11);
+  });
+
+  it('preserves negative final scores across the whole forecast range', () => {
+    const finalEnv: ForecastEnv = { ...env, scoring: compileScoring({ rec: -2 }),
+      gameStatus: () => 'complete', liveStats: new Map([['p', { gp: 1, rec: 6 }]]) };
+    const result = withLiveState(finalEnv, pregameForecast(finalEnv, 'p', 3));
+    expect(result.expected).toBe(-12);
+    expect([result.floor, result.median, result.ceiling]).toEqual([-12, -12, -12]);
   });
 });

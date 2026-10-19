@@ -12,14 +12,14 @@ import {
 import { sourceFor, type LeagueExtras, type Platform } from './source.ts';
 import { defenseRows, fitDefenseModel, type DefenseModel } from '../engine/dst.ts';
 import { FeatureState } from '../engine/features.ts';
-import { pregameForecast, replayForecast, withLiveState, type ForecastEnv, type PregamePoint, type WeekForecast } from '../engine/forecast.ts';
+import { pregameForecast, replayForecast, withLiveState, type ForecastEnv, type PregameEstimate, type PregamePoint, type WeekForecast } from '../engine/forecast.ts';
 import { adviseLineup, bestLineup, startable, type LineupAdvice, type TeamLineup } from '../engine/lineup.ts';
 import { ProjectionModel, type ModelFile } from '../engine/model.ts';
 import { starterSlots } from '../engine/positions.ts';
 import { buildTeamWeeks, summarizeSeason, type SeasonSummary, type TeamWeek } from '../engine/recap.ts';
 import { compileScoring, didPlay, hasForecast } from '../engine/scoring.ts';
 import { computeValues, type PlayerValue } from '../engine/values.ts';
-import { readSnapshots } from './snapshots.ts';
+import { readSnapshots, verifiedSnapshot } from './snapshots.ts';
 import type { NflGame, PlayerInfo, Stats } from '../engine/types.ts';
 
 export const MODEL_DIR = path.resolve(import.meta.dirname, '..', 'model');
@@ -101,7 +101,7 @@ export interface LeagueCore {
    * was running (data/snapshots), otherwise replayed from the games before that week. Later
    * weeks get the current forecast. `season` defaults to the league's season (last season: replay only).
    */
-  pregame: (id: string, week: number, season?: number) => number | null;
+  pregame: (id: string, week: number, season?: number) => PregameEstimate | null;
   /** The current week's forecasts as they stand before the live overlay. */
   currentPregame: ReadonlyMap<string, WeekForecast>;
   generatedAt: string;
@@ -427,15 +427,21 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
   const isLocked = (pid: string) => {
     if (week === null) return true;
     const f = forecasts.get(week)?.get(pid);
-    return !!f?.live && f.live.status !== 'pre_game';
+    return !!f && ((f.kickoff !== null && f.kickoff <= now) || (!!f.live && f.live.status !== 'pre_game'));
   };
-  const pregame = (pid: string, w: number, s = season): number | null => {
-    if (s !== season) return history.pregame.get(`${s}:${w}`)?.get(pid)?.exp ?? null;
-    const saved = snapshots.get(w)?.[pid]?.exp;
-    if (week !== null && w > week) return forecasts.get(w)?.get(pid)?.expected ?? null;
+  const pregame = (pid: string, w: number, s = season): PregameEstimate | null => {
+    const result = (exp: number | undefined, source: PregameEstimate['source'], savedAt: number | null = null): PregameEstimate | null =>
+      exp === undefined ? null : { exp, source, savedAt };
+    if (s !== season) return result(history.pregame.get(`${s}:${w}`)?.get(pid)?.exp, 'replay');
+    const team = statsByWeek.get(w)?.get(pid)?.team ?? projectionsByWeek.get(w)?.get(pid)?.team ?? players[pid]?.team;
+    const saved = verifiedSnapshot(snapshots.get(w)?.[pid], team ? gameFor(team, w)?.kickoff : null);
+    if (week !== null && w > week) return result(forecasts.get(w)?.get(pid)?.expected, 'current');
     // The saved copy is frozen at kickoff; before kickoff the current forecast is the pregame one.
-    if (w === week) return isLocked(pid) && saved !== undefined ? saved : currentPre.get(pid)?.expected ?? saved ?? null;
-    return saved ?? history.pregame.get(`${s}:${w}`)?.get(pid)?.exp ?? null;
+    if (w === week && !isLocked(pid)) return result(currentPre.get(pid)?.expected, 'current');
+    if (saved) return result(saved.exp, 'saved', saved.at);
+    // A rebuilt forecast after kickoff can reflect an in-game injury. It is not a pregame estimate.
+    if (w === week) return null;
+    return result(history.pregame.get(`${s}:${w}`)?.get(pid)?.exp, 'replay');
   };
 
   const teams: TeamInfo[] = rosters.map(r => {

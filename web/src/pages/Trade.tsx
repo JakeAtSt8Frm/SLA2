@@ -30,6 +30,7 @@ export default function TradePage() {
   return (
     <div className="space-y-5">
       <PageHeader title="Trade lab" />
+      <p className="text-[12px] leading-relaxed text-ink-3">Scenarios assume the trade takes effect next scoring week. This week’s lineups and points stay with their current teams; your league’s actual trade processing time may differ.</p>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
         <RosterPicker rosterId={a} onTeam={v => { setA(v); setAGives([]); if (v === b) setB(a); trade.reset(); }} exclude={b} players={byOwner.get(a) ?? []} selected={aGives} onPick={id => pick('a', id)} />
         <div className="flex items-center justify-center"><Button variant="ghost" onClick={swapTeams} title="Swap sides"><ArrowLeftRight size={18} /><span className="sr-only">Swap sides</span></Button></div>

@@ -15,6 +15,32 @@ const GAME_MINUTES = 185;
 const r1 = (n: number) => round(n, 1);
 const r2 = (n: number) => round(n, 2);
 
+/** The same normal approximation as live win odds, including certain completed scores. */
+function liveRange(a: { mean: number; variance: number }, b: { mean: number; variance: number }): NonNullable<Game['range']> {
+  const sa = Math.sqrt(a.variance), sb = Math.sqrt(b.variance);
+  let lo = Math.min(a.mean - 2.576 * sa, b.mean - 2.576 * sb);
+  let hi = Math.max(a.mean + 2.576 * sa, b.mean + 2.576 * sb);
+  if (hi - lo < 0.1) { lo -= 1; hi += 1; }
+  const histogram = (mean: number, sd: number) => {
+    const bins = 28, width = (hi - lo) / bins;
+    if (sd <= 1e-6) {
+      const counts = new Array<number>(bins).fill(0);
+      counts[Math.min(bins - 1, Math.max(0, Math.floor((mean - lo) / width)))] = 1;
+      return counts;
+    }
+    return Array.from({ length: bins }, (_, i) => {
+      const lower = i === 0 ? 0 : normalCdf((lo + i * width - mean) / sd);
+      const upper = i === bins - 1 ? 1 : normalCdf((lo + (i + 1) * width - mean) / sd);
+      return upper - lower;
+    });
+  };
+  return {
+    a: [r1(a.mean - 1.282 * sa), r1(a.mean), r1(a.mean + 1.282 * sa)],
+    b: [r1(b.mean - 1.282 * sb), r1(b.mean), r1(b.mean + 1.282 * sb)],
+    histogram: { lo: r1(lo), hi: r1(hi), a: histogram(a.mean, sa), b: histogram(b.mean, sb) },
+  };
+}
+
 export function applyLive<G extends Game>(g: G, live: LiveWeek, scoring: [string, number][], now: number): G {
   if (!g.b || g.final) return g;
   const side = (s: Game['a']) => {
@@ -23,7 +49,8 @@ export function applyLive<G extends Game>(g: G, live: LiveWeek, scoring: [string
       if (!p.id) return p;
       const line = live.lines.get(p.id);
       const kickoff = p.forecast?.kickoff ?? null;
-      const status: LiveStatus = (p.team && live.status.get(p.team)) || (kickoff && kickoff <= now ? 'in_game' : 'pre_game');
+      const reported = (p.team && live.status.get(p.team)) || p.forecast?.live?.status;
+      const status: LiveStatus = reported === 'complete' || reported === 'in_game' ? reported : kickoff !== null && kickoff <= now ? 'in_game' : 'pre_game';
       const pts = status === 'pre_game' ? 0 : line ? scoreStatsExact(completeStats(line, (p.pos ?? 'WR') as Pos), scoring) : p.points ?? 0;
       points += pts;
       // Pregame outcome; without one, read the spread off the forecast's 10–90% band.
@@ -46,5 +73,5 @@ export function applyLive<G extends Game>(g: G, live: LiveWeek, scoring: [string
   const A = side(g.a), B = side(g.b);
   const spread = Math.sqrt(A.variance + B.variance);
   const winProbA = spread > 1e-6 ? normalCdf((A.mean - B.mean) / spread) : A.mean > B.mean ? 1 : A.mean < B.mean ? 0 : 0.5;
-  return { ...g, a: A.side, b: B.side, winProbA: round(winProbA, 4) };
+  return { ...g, a: A.side, b: B.side, winProbA: round(winProbA, 4), range: liveRange(A, B), optimizedWinProbA: null, liveEstimate: true };
 }

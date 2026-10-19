@@ -6,6 +6,7 @@ import { fmt, kickoff, pct, prob, signed, FEATURE_LABELS } from '../lib/format.t
 import { useSearchParam } from '../lib/router.ts';
 import { HBars, RangeBar, Sparkline, useWidth } from '../charts/charts.tsx';
 import { Card, Delta, Empty, Injury, Pos, Ranks, Skeleton, TeamLink, useEscape, cx } from './ui.tsx';
+import { ForecastSource } from './ForecastSource.tsx';
 
 /** Short, human reading of a model input. */
 function describe(key: string, v: number | null): string | null {
@@ -93,7 +94,7 @@ export function PlayerDrawer() {
                         <div className="num text-[28px] font-semibold leading-tight">{fmt(f.live.points)}</div>
                       </div>
                       {f.live.status === 'in_game' && <div><div className="text-[12px] text-ink-3">Projected final</div><div className="num text-[20px] font-semibold">{fmt(f.exp)}</div></div>}
-                      <div><div className="text-[12px] text-ink-3">Pregame forecast</div><div className="num text-[20px] font-semibold">{fmt(d.pregame)}</div>{d.pregame !== null && f.live.status === 'complete' && <Delta value={f.live.points - d.pregame} className="text-[12px]" />}</div>
+                      <div><div className="text-[12px] text-ink-3">Pregame forecast</div><div className="num text-[20px] font-semibold">{fmt(d.pregame)}</div><ForecastSource source={d.pregameSource} savedAt={d.pregameSavedAt} />{d.pregame !== null && f.live.status === 'complete' && <Delta value={f.live.points - d.pregame} className="text-[12px]" />}</div>
                       <div><div className="text-[12px] text-ink-3">Sleeper projection</div><div className="num text-[20px] font-semibold">{fmt(f.provider)}</div></div>
                     </div>
                   ) : (
@@ -101,9 +102,11 @@ export function PlayerDrawer() {
                       <div><div className="text-[12px] text-ink-3">Expected</div><div className="num text-[28px] font-semibold leading-tight">{fmt(f.exp)}</div></div>
                       <div><div className="text-[12px] text-ink-3">If active</div><div className="num text-[20px] font-semibold">{fmt(f.mean)}</div></div>
                       <div><div className="text-[12px] text-ink-3">Chance to play</div><div className="num text-[20px] font-semibold">{prob(f.play)}</div></div>
-                      <div><div className="text-[12px] text-ink-3">Sleeper projection</div><div className="num text-[20px] font-semibold">{fmt(f.provider)}</div>{f.provider !== null && <Delta value={f.exp - f.provider} className="text-[12px]" />}</div>
+                      <div><div className="text-[12px] text-ink-3">Sleeper projection</div><div className="num text-[20px] font-semibold">{fmt(f.provider)}</div>{f.provider !== null && <div className="text-[12px] text-ink-3">Model adj. <Delta value={f.mean - f.provider} /></div>}</div>
                     </div>
                   )}
+                  {f.live && f.live.status !== 'pre_game' && d.pregame === null && <p className="mt-2 text-[12px] text-ink-3">No verified forecast was saved before kickoff for this player.</p>}
+                  {(!f.live || f.live.status === 'pre_game') && !f.bye && <p className="mt-2 text-[12px] leading-relaxed text-ink-3">Expected points = {fmt(f.mean)} if active × {pct(f.play, 1)} chance to play. Availability adjustment: {signed(f.exp - f.mean)} pts{f.provider === null ? '. No provider projection is available; this forecast relies on player history.' : '.'}</p>}
                   {f.live?.status !== 'complete' && (
                     <div className="mt-4">
                       <FluidRange floor={f.floor} median={f.median} ceiling={f.ceiling} expected={f.exp} max={Math.max(f.ceiling * 1.1, 10)} />
@@ -202,6 +205,7 @@ function GameLog({ d, pos, weeks }: { d: NonNullable<ReturnType<typeof usePlayer
         <div className="eyebrow">Game log (league scoring)</div>
         {weeks && <Sparkline points={weeks} width={120} />}
       </div>
+      <p className="px-4 pt-2 text-[11px] leading-relaxed text-ink-3 sm:px-5">Saved = recorded before kickoff. Replay = retrospective estimate from the current model trained on completed seasons and weeks, not out-of-sample evidence. Only verified saved forecasts count in the live track record.</p>
       {d.gameLog.length === 0 ? <Empty title="No games in the last two seasons" /> : (
         <div className="mt-2 max-h-[440px] overflow-y-auto scroll-thin">
           <div className={cx('num sticky top-0 z-[1] grid gap-2 border-b border-line bg-surface px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-3 sm:px-5', cols)}>
@@ -216,7 +220,7 @@ function GameLog({ d, pos, weeks }: { d: NonNullable<ReturnType<typeof usePlayer
                   <div className={cx('num grid items-baseline gap-2 text-[13px]', cols)}>
                     <span className="whitespace-nowrap text-ink-2">{g.season !== boot.league.season ? `’${String(g.season).slice(2)} ` : ''}W{g.week}</span>
                     <span className="truncate text-ink-2">{g.opp ?? '—'}</span>
-                    <span className="text-right text-ink-3">{fmt(g.proj)}</span>
+                    <span className="text-right text-ink-3">{fmt(g.proj)}<ForecastSource source={g.projSource} savedAt={g.projSavedAt} /></span>
                     <span className={cx('text-right font-semibold', diff >= 3 ? 'text-good-ink' : diff <= -3 ? 'text-bad-ink' : 'text-ink')}>{fmt(g.pts)}</span>
                     {snaps && <span className="text-right text-ink-3">{g.snapShare === null ? '—' : pct(g.snapShare)}</span>}
                   </div>

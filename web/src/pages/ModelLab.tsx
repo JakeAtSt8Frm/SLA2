@@ -134,15 +134,18 @@ function Tracking() {
   const q = useTracking(leagueId);
   return (
     <Card>
-      <CardHeader title="Live track record" />
+      <CardHeader title="Live track record" subtitle="Verified forecasts saved before kickoff · evaluated after each completed week" />
+      {q.isError && <ErrorState error={q.error} onRetry={() => void q.refetch()} />}
+      {q.data && <p className="mb-3 text-[12px] leading-relaxed text-ink-2">{q.data.note}</p>}
+      {!!q.data?.excludedSnapshots && <p className="mb-3 text-[12px] text-ink-3">{q.data.excludedSnapshots} saved forecasts excluded because their timestamps could not be verified before kickoff.</p>}
       {q.data && q.data.weeks.length ? (
         <div className="-mx-4 overflow-x-auto scroll-thin sm:-mx-5">
         <table className="tbl num text-[13px]">
-          <thead><tr><th>Week</th><th className="r">Players</th><th className="r">SLA MAE</th><th className="r">Sleeper MAE</th><th className="r">Bias</th><th className="r">Pair accuracy</th></tr></thead>
-          <tbody>{q.data.weeks.map(w => <tr key={w.week}><td>Week {w.week}</td><td className="r">{w.players}</td><td className={cx('r font-semibold', w.maeModel < w.maeProvider && 'text-good-ink')}>{fmt(w.maeModel, 2)}</td><td className="r">{fmt(w.maeProvider, 2)}</td><td className="r text-ink-2">{fmt(w.biasModel, 2)}</td><td className="r">{w.pairAcc === null ? '—' : pct(w.pairAcc, 1)}</td></tr>)}</tbody>
+          <thead><tr><th>Week</th><th className="r">Players</th><th className="r">SLA MAE</th><th className="r">Sleeper MAE</th><th className="r">Bias</th><th className="r">Pair accuracy</th><th className="r">Pairs</th><th className="r" title="Snapshots without a verifiable pre-kickoff timestamp">Unverified</th></tr></thead>
+          <tbody>{q.data.weeks.map(w => <tr key={w.week}><td>Week {w.week}</td><td className="r">{w.players}</td><td className={cx('r font-semibold', w.maeModel < w.maeProvider && 'text-good-ink')}>{fmt(w.maeModel, 2)}</td><td className="r">{fmt(w.maeProvider, 2)}</td><td className="r text-ink-2">{signed(w.biasModel, 2)}</td><td className="r">{w.pairAcc === null ? '—' : pct(w.pairAcc, 1)}</td><td className="r">{fmt(w.pairs, 0)}</td><td className="r">{fmt(w.excluded, 0)}</td></tr>)}</tbody>
         </table>
         </div>
-      ) : <Empty title="Collecting">Appears after the first week with saved forecasts is final.</Empty>}
+      ) : !q.isError && <Empty title={q.isPending ? 'Loading track record' : 'Collecting'}>Appears after the first week with verified saved forecasts is final.</Empty>}
     </Card>
   );
 }

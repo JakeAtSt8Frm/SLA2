@@ -5,6 +5,7 @@ import { useLiveGames } from '../lib/live.ts';
 import { useSearchParam } from '../lib/router.ts';
 import { ScoreDistribution, WinBar } from '../charts/charts.tsx';
 import { Card, Empty, ErrorState, Injury, PageHeader, PageSkeleton, PlayerLink, Select, TeamAvatar, TeamLink, cx } from '../components/ui.tsx';
+import { ForecastSource } from '../components/ForecastSource.tsx';
 
 export default function MatchupsPage() {
   const { leagueId } = useApp();
@@ -27,6 +28,7 @@ function MatchupsView({ m, fetching, onWeek }: { m: Matchups; fetching: boolean;
         title={`Week ${m.week} matchups`}
         right={<Select label="Week" value={m.week} onChange={v => onWeek(v === boot.league.week ? null : String(v), true)} options={m.weeks.map(w => ({ value: w, label: `Week ${w}${w === boot.league.week ? ' (current)' : ''}` }))} className="w-44" />}
       />
+      {(m.final || m.current) && <p className="text-[12px] leading-relaxed text-ink-3">Saved forecasts were recorded before kickoff. Replays use the current model trained on completed seasons and weeks; they are not out-of-sample evidence. A dash means no pregame forecast is available.</p>}
       {games.length === 0 && <Card><Empty title="No matchups scheduled this week" /></Card>}
       {games.map(g => <GameCard key={g.matchupId ?? g.a.rosterId} g={g} />)}
     </div>
@@ -38,12 +40,14 @@ function GameCard({ g }: { g: Game }) {
   if (!g.b) return null;
   const b = g.b;
   const aWon = g.final && g.a.points > b.points, bWon = g.final && b.points > g.a.points;
-  const live = !g.final && (g.a.points > 0 || b.points > 0);
+  const live = !g.final && [g.a, b].some(s => s.lineup.some(p => p.forecast?.live && p.forecast.live.status !== 'pre_game'));
   const mine = g.a.rosterId === myTeamId || b.rosterId === myTeamId;
   const scored = g.final || live;
   const sub = (s: Game['a']): string[] => {
-    if (g.final) return s.pregame !== null ? [`proj ${fmt(s.pregame)}`] : ['final'];
-    if (live) return [`proj ${fmt(s.projected)}`, ...(s.pregame !== null ? [`pregame ${fmt(s.pregame)}`] : [])];
+    const c = s.pregameCoverage;
+    const sources = c ? c.missing > 0 ? `${c.total - c.missing}/${c.total} pregame forecasts available` : [c.saved && `${c.saved} saved`, c.replay && `${c.replay} replayed`, c.current && `${c.current} current`].filter(Boolean).join(' · ') : '';
+    if (g.final) return [s.pregame !== null ? `proj ${fmt(s.pregame)}` : 'final', sources];
+    if (live) return [`proj ${fmt(s.projected)}`, ...(s.pregame !== null ? [`pregame ${fmt(s.pregame)}`] : []), sources];
     return [`projected${s.optimal !== null && s.projected !== null && s.optimal - s.projected > 0.5 ? ` · ${fmt(s.optimal)} best` : ''}`];
   };
   return (
@@ -72,6 +76,7 @@ function GameCard({ g }: { g: Game }) {
           </div>
         </div>
       )}
+      {g.liveEstimate && <p className="mt-2 text-[11px] leading-relaxed text-ink-3">Live odds and ranges use a normal approximation of points still to come. Game progress is estimated from time since kickoff; delays and overtime can affect the estimate.</p>}
       <div className="mt-4" role="table" aria-label={`${teamName(g.a.rosterId)} vs ${teamName(b.rosterId)} lineups`}>
         <div role="row" className="grid grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)] gap-2 border-b border-line pb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-3">
           <span role="columnheader" className="flex items-end justify-between gap-2"><span className="truncate">{teamName(g.a.rosterId)}</span><PtsHeader scored={scored} /></span>
@@ -116,7 +121,7 @@ function Side({ rosterId, name, score, won, sub, right }: { rosterId: number; na
       <div className="min-w-0">
         <div className="truncate text-[14px] font-semibold">{name}</div>
         <div className="num text-[24px] font-semibold leading-tight tracking-tight sm:text-[26px]">{fmt(score)}{won && <span className="ml-1.5 align-middle text-[11px] font-bold text-good-ink">W</span>}</div>
-        {sub.map(line => <div key={line} className="num truncate text-[12px] leading-snug text-ink-3">{line}</div>)}
+        {sub.filter(Boolean).map(line => <div key={line} className="num text-[12px] leading-snug text-ink-3">{line}</div>)}
       </div>
     </div>
   );
@@ -130,6 +135,7 @@ function LineupCell({ p, value, better, scored, right }: { p: Game['a']['lineup'
     <span className={cx('num shrink-0', right ? 'text-left' : 'text-right')}>
       <span className={cx('block text-[14px] leading-tight', better ? 'font-semibold text-ink' : 'text-ink-2')}>{fmt(value)}</span>
       {scored && p.pregame !== null && <span className="block text-[11px] leading-tight text-ink-3">{fmt(p.pregame)}</span>}
+      {scored && p.pregame !== null && <ForecastSource source={p.pregameSource} savedAt={p.pregameSavedAt} />}
     </span>
   );
   if (!p.id || !p.name) return <span role="cell" className={cx('text-[13px] text-ink-3', right && 'text-right')}>Empty</span>;

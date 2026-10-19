@@ -95,7 +95,7 @@ function finish(f: Omit<WeekForecast, 'expected' | 'floor' | 'median' | 'ceiling
   const outcome: Outcome = { mean: f.mean, play: f.play, residuals: f.residuals };
   return {
     ...f, expected: f.play * f.mean,
-    floor: Math.max(-5, mixtureQuantile(outcome, 0.1)), median: mixtureQuantile(outcome, 0.5), ceiling: mixtureQuantile(outcome, 0.9),
+    floor: mixtureQuantile(outcome, 0.1), median: mixtureQuantile(outcome, 0.5), ceiling: mixtureQuantile(outcome, 0.9),
   };
 }
 
@@ -154,6 +154,12 @@ export function pregameForecast(env: ForecastEnv, id: string, week: number): Wee
 
 /** A past week's pregame numbers, rebuilt from what was known before kickoff (the injury tag aside). */
 export interface PregamePoint { exp: number; mean: number; provider: number | null }
+
+export interface PregameEstimate {
+  exp: number;
+  source: 'saved' | 'replay' | 'current';
+  savedAt: number | null;
+}
 
 /**
  * Replays the pregame forecast of a completed week. `env.state` must hold only the games before

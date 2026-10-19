@@ -1,6 +1,7 @@
 import { useMutation, useQuery, type QueryClient } from '@tanstack/react-query';
 // Type-only: the server's view functions define the API contract end to end.
 import type * as V from '../../../server/views.ts';
+import type { trackRecord } from '../../../server/snapshots.ts';
 import { evaluateTrade, TradeError, type TradeKit, type TradeRequest } from '../../../engine/trade.ts';
 
 export type Bootstrap = Awaited<ReturnType<typeof V.bootstrap>>;
@@ -167,4 +168,4 @@ export interface ModelReport {
     parity: { checked: number; maxDiff: number };
   };
 }
-export interface Tracking { weeks: { week: number; players: number; maeModel: number; maeProvider: number; biasModel: number; pairAcc: number | null }[]; note: string }
+export type Tracking = Awaited<ReturnType<typeof trackRecord>>;

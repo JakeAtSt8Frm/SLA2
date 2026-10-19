@@ -104,9 +104,11 @@ export interface TradeKit {
 
 export interface TradeRequest { a: number; b: number; aGives: string[]; bGives: string[] }
 
-/** Player errors are close to independent across NFL teams; add a small common-mode term. */
-export const lineupDist = (l: { expected: number; sd: number }, factor: number): TeamWeekDist =>
-  ({ mean: l.expected * factor, sd: Math.sqrt(l.sd ** 2 + (0.03 * l.expected * factor) ** 2) });
+/** Apply manager effects and common uncertainty only to points that have not been scored. */
+export function lineupDist(l: { expected: number; sd: number }, factor: number, bankedPoints = 0): TeamWeekDist {
+  const remaining = (l.expected - bankedPoints) * factor;
+  return { mean: bankedPoints + remaining, sd: Math.sqrt(l.sd ** 2 + (0.03 * remaining) ** 2) };
+}
 
 export class TradeError extends Error {}
 
@@ -158,7 +160,8 @@ export function evaluateTrade(kit: TradeKit, body: TradeRequest) {
   const after = simulateSeason({
     teams: kit.teams.map(t => t.rosterId),
     record: new Map(kit.teams.map(t => [t.rosterId, t.record])),
-    remaining: kit.remaining.filter(g => weeks.includes(g.week) && g.week <= kit.lastRegularWeek),
+    // The current week's result still counts when the trade takes effect next week.
+    remaining: kit.remaining.filter(g => g.week <= kit.lastRegularWeek),
     dist: (rid, w) => override.get(`${rid}:${w}`) ?? (d => (d ? { mean: d[0], sd: d[1] } : { mean: 0, sd: 1 }))(kit.dists[`${rid}:${w}`]),
     ...kit.season,
   });
@@ -181,5 +184,5 @@ export function evaluateTrade(kit: TradeKit, body: TradeRequest) {
   const edge = (x: typeof A) => x.rosDelta / Math.max(1, weeks.length) + 0.08 * (x.dynastyIn - x.dynastyOut);
   const ea = edge(A), eb = edge(B);
   const verdict = (Math.abs(ea - eb) < 1.2 ? 'fair' : ea > eb ? 'a' : 'b') as 'fair' | 'a' | 'b';
-  return { weeks, a: A, b: B, verdict, note: 'Now = expected points from each team’s best legal lineup, every remaining week. Dynasty = four-season value on the age curve.' };
+  return { weeks, a: A, b: B, verdict, note: `Trade impact starts ${weeks.length ? `in week ${weeks[0]}` : 'after the remaining forecast horizon'}; current-week results and lineups stay with their original teams. Now = each team’s best legal lineup from then on. Dynasty = four-season value on the age curve.` };
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { optimizeLineup } from '../engine/optimizer.ts';
 import { waiverRecommendations } from '../engine/waivers.ts';
 import { simulateMatchup, simulateSeason } from '../engine/simulate.ts';
+import { lineupDist } from '../engine/trade.ts';
 import type { WeekForecast } from '../engine/forecast.ts';
 import type { PlayerInfo, Pos } from '../engine/types.ts';
 
@@ -74,6 +75,18 @@ describe('lineup identities', () => {
 });
 
 describe('settled matchup simulation', () => {
+  it('never changes points already banked or invents uncertainty after every starter is final', () => {
+    const a = lineupDist({ expected: 150, sd: 0 }, 0.8, 150);
+    const b = lineupDist({ expected: 147, sd: 0 }, 1.1, 147);
+    expect(a).toEqual({ mean: 150, sd: 0 });
+    expect(b).toEqual({ mean: 147, sd: 0 });
+    const result = simulateSeason({ teams: [1, 2], record: new Map(), remaining: [{ week: 6, a: 1, b: 2 }],
+      dist: id => id === 1 ? a : b, playoffTeams: 2, playoffStart: 7,
+      roundWeeks: 1, finalWeeks: 1, leverageWeek: 6, sims: 100 });
+    expect(result.gameWinProb.get('6:1:2')).toBe(1);
+    expect(result.teams.map(t => t.meanPointsFor)).toEqual([150, 147]);
+  });
+
   it('keeps a normalized histogram when both teams have the same certain score', () => {
     const certain = { mean: 100, play: 1, residuals: new Array(21).fill(0) };
     const result = simulateMatchup([certain], [certain], 'tie', 100);

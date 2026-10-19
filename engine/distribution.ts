@@ -28,7 +28,7 @@ export function hashSeed(text: string): number {
 }
 
 function interp(table: readonly number[], u: number): number {
-  const x = Math.min(0.999999, Math.max(0, u)) * (table.length - 1);
+  const x = Math.min(1, Math.max(0, u)) * (table.length - 1);
   const i = Math.floor(x);
   return table[i] + (table[Math.min(i + 1, table.length - 1)] - table[i]) * (x - i);
 }
@@ -46,7 +46,9 @@ export function expected(o: Outcome): number {
 export function variance(o: Outcome): number {
   const r = o.residuals;
   let m2 = 0;
-  for (let i = 0; i < r.length - 1; i++) m2 += (r[i] * r[i] + r[i + 1] * r[i + 1]) / 2;
+  // Integrate the square of each linear segment, matching sample(), not a linear
+  // approximation of squared endpoints (which overstates the tail variance).
+  for (let i = 0; i < r.length - 1; i++) m2 += (r[i] * r[i] + r[i] * r[i + 1] + r[i + 1] * r[i + 1]) / 3;
   m2 /= r.length - 1;
   const conditional = m2 + o.mean * o.mean;
   return Math.max(0, o.play * conditional - (o.play * o.mean) ** 2);
@@ -56,6 +58,9 @@ export function variance(o: Outcome): number {
 export function mixtureQuantile(o: Outcome, q: number): number {
   const miss = 1 - o.play;
   if (o.play <= 0) return 0;
+  if (o.play >= 1) return o.mean + interp(o.residuals, q);
+  if (q <= 0) return Math.min(0, o.mean + o.residuals[0]);
+  if (q >= 1) return Math.max(0, o.mean + o.residuals[o.residuals.length - 1]);
   // Values below zero only occur when playing; treat the DNP mass as sitting at exactly 0.
   const belowZeroShare = zeroCdf(o);
   const pZeroOrLess = o.play * belowZeroShare + miss;
@@ -82,19 +87,19 @@ function zeroCdf(o: Outcome): number {
 
 /** P(outcome >= threshold). */
 export function exceedProbability(o: Outcome, threshold: number): number {
-  if (threshold <= 0) return 1;
+  const dnp = threshold <= 0 ? 1 - o.play : 0;
   const r = o.residuals;
   const target = threshold - o.mean;
-  if (target <= r[0]) return o.play;
-  if (target >= r[r.length - 1]) return 0;
+  if (target <= r[0]) return dnp + o.play;
+  if (target > r[r.length - 1]) return dnp;
   for (let i = 0; i < r.length - 1; i++) {
     if (target <= r[i + 1]) {
       const span = r[i + 1] - r[i];
       const frac = span > 0 ? (target - r[i]) / span : 0;
-      return o.play * (1 - (i + frac) / (r.length - 1));
+      return dnp + o.play * (1 - (i + frac) / (r.length - 1));
     }
   }
-  return 0;
+  return dnp;
 }
 
 /** P(A outscores B) by simulation — for close start/sit calls. */
