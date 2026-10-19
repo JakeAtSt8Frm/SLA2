@@ -323,7 +323,14 @@ export function useSort<T>(rows: T[], initial: { key: string; dir: 'asc' | 'desc
   return { sorted, header, sort };
 }
 
-/** Keep keyboard focus inside an open dialog and restore it when the dialog closes. */
+// Counted, so dialogs that open and close out of order can't leave the page unscrollable.
+let scrollLocks = 0;
+function lockScroll() {
+  if (scrollLocks++ === 0) document.body.style.overflow = 'hidden';
+  return () => { if (--scrollLocks === 0) document.body.style.overflow = ''; };
+}
+
+/** Keep keyboard focus inside an open dialog and restore it when the dialog closes. The page behind stays put (iOS would otherwise scroll it under the dialog). */
 export function useEscape(onClose: () => void, active = true) {
   const ref = useRef(onClose);
   const dialog = useRef<HTMLDivElement>(null);
@@ -332,8 +339,7 @@ export function useEscape(onClose: () => void, active = true) {
     const panel = dialog.current;
     if (!active || !panel) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const unlock = lockScroll();
     const focusable = () => [...panel.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]')]
       .filter(el => el.tabIndex >= 0 && !el.hasAttribute('disabled') && el.getClientRects().length > 0);
     (focusable()[0] ?? panel).focus();
@@ -349,7 +355,7 @@ export function useEscape(onClose: () => void, active = true) {
     window.addEventListener('keydown', h);
     return () => {
       window.removeEventListener('keydown', h);
-      document.body.style.overflow = overflow;
+      unlock();
       if (previous?.isConnected) previous.focus();
     };
   }, [active]);

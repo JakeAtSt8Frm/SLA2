@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { usePlayer } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
@@ -40,13 +39,6 @@ export function PlayerDrawer() {
   const q = usePlayer(leagueId, pid);
   const close = () => setPid(null, true);
   const dialog = useEscape(close, !!pid);
-  // The page behind the card stays put (iOS would otherwise scroll it under the drawer).
-  useEffect(() => {
-    if (!pid) return;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = overflow; };
-  }, [pid]);
   if (!pid) return null;
   const d = q.data;
   const p = d?.player;
