@@ -269,6 +269,30 @@ function mapPlayer(ref: EspnPlayerRef, players: Record<string, PlayerInfo>, extr
   return id;
 }
 
+/** App player id ↔ ESPN id, built by running every ESPN player through mapPlayer, as the league data is. */
+export interface EspnIdIndex { byPid: Map<string, number>; byEspn: Map<number, string> }
+const idIndexes = new Map<string, { at: number; index: Promise<EspnIdIndex> }>();
+export function espnIdIndex(id: string): Promise<EspnIdIndex> {
+  const hit = idIndexes.get(id);
+  if (hit && Date.now() - hit.at < HOUR) return hit.index;
+  const index = (async () => {
+    const [{ season }, players, parsed] = await Promise.all([resolve(id), sleeper.players(), espnLeague(id)]);
+    const dir = await directory(season);
+    // Inherits the league's ESPN-only players; mapPlayer's placeholders for unmatched names land here, not in the league.
+    const scratch = Object.create(parsed.extraPlayers) as Record<string, PlayerInfo>;
+    const out: EspnIdIndex = { byPid: new Map(), byEspn: new Map() };
+    for (const [espnId, [name, pos, team]] of Object.entries(dir)) {
+      const pid = mapPlayer({ espnId: Number(espnId), name, pos: POSITIONS[pos] ?? null, team: PRO_TEAMS[team] ?? null, injury: null }, players, scratch);
+      out.byEspn.set(Number(espnId), pid);
+      if (!out.byPid.has(pid)) out.byPid.set(pid, Number(espnId));
+    }
+    return out;
+  })();
+  index.catch(() => idIndexes.delete(id));
+  idIndexes.set(id, { at: Date.now(), index });
+  return index;
+}
+
 // ─── Parsed league ───────────────────────────────────────────────────────────
 
 /** NFL week containing a timestamp. Week 1 starts the Tuesday after Labor Day (first Monday of September). */

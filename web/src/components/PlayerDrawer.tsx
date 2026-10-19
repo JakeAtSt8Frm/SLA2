@@ -2,10 +2,11 @@ import { X } from 'lucide-react';
 import { usePlayer } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { fmt, kickoff, pct, prob, signed, FEATURE_LABELS } from '../lib/format.ts';
-import { useSearchParam } from '../lib/router.ts';
+import { navigate, useSearchParam } from '../lib/router.ts';
 import { HBars, RangeBar, Sparkline, useWidth } from '../charts/charts.tsx';
 import { Card, Delta, Empty, Injury, Pos, Ranks, Skeleton, TeamLink, useEscape, cx } from './ui.tsx';
 import { ForecastSource } from './ForecastSource.tsx';
+import { ClaimPanel } from './ClaimPanel.tsx';
 
 /** Short, human reading of a model input. */
 function describe(key: string, v: number | null): string | null {
@@ -34,10 +35,16 @@ const relevantInput = (key: string, pos: string) => {
 };
 
 export function PlayerDrawer() {
-  const [pid, setPid] = useSearchParam('player');
+  const [pid] = useSearchParam('player');
+  const [dropParam] = useSearchParam('drop');
   const { leagueId, boot } = useApp();
   const q = usePlayer(leagueId, pid);
-  const close = () => setPid(null, true);
+  const close = () => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete('player');
+    params.delete('drop');
+    navigate(`${window.location.pathname}${params.size ? `?${params}` : ''}`, { replace: true });
+  };
   const dialog = useEscape(close, !!pid);
   if (!pid) return null;
   const d = q.data;
@@ -73,6 +80,7 @@ export function PlayerDrawer() {
           {q.isPending && <div className="space-y-3"><Skeleton className="h-32" /><Skeleton className="h-48" /></div>}
           {d && p && (
             <>
+              {p.owner === null || p.owner !== boot.myRosterId ? <ClaimPanel pid={pid} initialDrop={dropParam} /> : null}
               {f ? (
                 <Card>
                   <div className="flex flex-wrap items-baseline justify-between gap-2">

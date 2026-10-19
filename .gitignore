@@ -9,3 +9,4 @@ research/review*.json
 data/snapshots
 .DS_Store
 sla/
+data/claims*.json

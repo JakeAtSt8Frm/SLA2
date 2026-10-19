@@ -1,7 +1,8 @@
-import { useMutation, useQuery, type QueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 // Type-only: the server's view functions define the API contract end to end.
 import type * as V from '../../../server/views.ts';
 import type { trackRecord } from '../../../server/snapshots.ts';
+import type * as C from '../../../server/claims.ts';
 import { evaluateTrade, TradeError, type TradeKit, type TradeRequest } from '../../../engine/trade.ts';
 
 export type Bootstrap = Awaited<ReturnType<typeof V.bootstrap>>;
@@ -140,6 +141,30 @@ export const useTracking = (id: string) => useQuery({ queryKey: ['tracking', id]
 export const useTrade = (id: string) => useMutation({
   mutationFn: (body: TradeRequest) => (STATIC ? tradeLocally(id, body) : request<Trade>(`${base(id)}/trade`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
 });
+/** ESPN auto-claims run on the local server, which holds the ESPN login; the static site has none. */
+export type ClaimInfo = Awaited<ReturnType<typeof C.claimInfo>>;
+export type ClaimJob = C.ClaimJob;
+export const CLAIMS_AVAILABLE = !STATIC;
+export const useClaimInfo = (id: string, pid: string | null, enabled = true) => useQuery({
+  queryKey: ['claims', id, pid ?? 'all'],
+  queryFn: () => request<ClaimInfo>(`${base(id)}/claims${pid ? `?player=${encodeURIComponent(pid)}` : ''}`),
+  enabled: enabled && CLAIMS_AVAILABLE, staleTime: 5_000,
+  refetchInterval: q => (q.state.data?.jobs.some(j => j.status === 'active') ? 5_000 : 30_000),
+});
+export const useStartClaim = (id: string) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: C.ClaimRequest) => request<ClaimJob>(`${base(id)}/claims`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    onSettled: () => client.invalidateQueries({ queryKey: ['claims', id] }),
+  });
+};
+export const useCancelClaim = (id: string) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (job: string) => request<ClaimJob>(`${base(id)}/claims/${encodeURIComponent(job)}`, { method: 'DELETE' }),
+    onSettled: () => client.invalidateQueries({ queryKey: ['claims', id] }),
+  });
+};
 export const searchLeagues = (username: string) => request<LeagueSearchResult>(`/api/users/${encodeURIComponent(username)}/leagues`);
 
 export interface Metrics { n: number; mae: number; rmse: number; bias: number; spearman: number; pairAcc: number; pairs: number; closePairAcc: number; closePairs: number; byPos: Record<string, { mae: number; n: number; bias: number; pairAcc: number }> }

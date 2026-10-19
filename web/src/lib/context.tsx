@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Bootstrap } from './api.ts';
 import { setPlatform, setTeamOrder } from './format.ts';
-import { useSearchParam } from './router.ts';
+import { navigate } from './router.ts';
 
 /** The owner this build is configured for; their team is picked by default. */
 const DEFAULT_OWNER = 'JakeAtSt8Frm';
@@ -13,7 +13,8 @@ interface AppState {
   teams: Map<number, Team>;
   myTeamId: number | null;
   setMyTeam: (id: number | null) => void;
-  openPlayer: (id: string) => void;
+  /** `drop`: a player of yours to preselect as the drop in the ESPN claim panel. */
+  openPlayer: (id: string, drop?: string | null) => void;
   teamName: (rosterId: number | null | undefined) => string;
 }
 
@@ -39,8 +40,12 @@ export function AppProvider({ leagueId, boot, children }: { leagueId: string; bo
     setMyTeamId(id);
     try { localStorage.setItem(storageKey, id === null ? '' : String(id)); } catch { /* storage optional */ }
   }, [storageKey]);
-  const [, setPlayer] = useSearchParam('player');
-  const openPlayer = useCallback((id: string) => setPlayer(id), [setPlayer]);
+  const openPlayer = useCallback((id: string, drop?: string | null) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('player', id);
+    if (drop) params.set('drop', drop); else params.delete('drop');
+    navigate(`${window.location.pathname}?${params}`);
+  }, []);
   const teams = useMemo(() => new Map(boot.teams.map(t => [t.rosterId, t])), [boot.teams]);
   const teamName = useCallback((rid: number | null | undefined) => (rid ? teams.get(rid)?.name ?? `Team ${rid}` : 'Free agent'), [teams]);
   const value = useMemo(() => ({ leagueId, boot, teams, myTeamId, setMyTeam, openPlayer, teamName }), [leagueId, boot, teams, myTeamId, setMyTeam, openPlayer, teamName]);

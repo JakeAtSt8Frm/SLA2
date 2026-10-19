@@ -1,4 +1,4 @@
-import { Hono, type Context } from 'hono';
+import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { compress } from 'hono/compress';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -9,6 +9,7 @@ import { configuredEspnLeagues, validEspnId } from './espn.ts';
 import { findLeagues } from './sleeper.ts';
 import { sendJson } from './http.ts';
 import { recordSnapshot, trackRecord } from './snapshots.ts';
+import { cancelClaim, claimInfo, createClaim, type ClaimRequest } from './claims.ts';
 import * as views from './views.ts';
 import { HttpError } from './views.ts';
 
@@ -65,6 +66,29 @@ app.post('/api/leagues/:id/trade', async c => {
   const b = body as Record<string, unknown>;
   return json(c, await views.trade(leagueId(c), { a: Number(b.a), b: Number(b.b), aGives: (b.aGives ?? []) as string[], bGives: (b.bGives ?? []) as string[] }));
 });
+/**
+ * Auto-claims make roster moves with the saved ESPN login, so they answer only requests addressed to
+ * this machine (no DNS rebinding) from the app's own pages (no cross-site form posts), as JSON.
+ */
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const localOnly: MiddlewareHandler = async (c, next) => {
+  const origin = c.req.header('origin');
+  let originHost = '';
+  try { originHost = origin ? new URL(origin).host : ''; } catch { originHost = 'invalid'; }
+  if (!LOCAL_HOST.test(c.req.header('host') ?? '') || (origin !== undefined && !LOCAL_HOST.test(originHost))) throw new HttpError(403, 'Auto-claims only work from this computer.');
+  if (c.req.method === 'POST' && !(c.req.header('content-type') ?? '').startsWith('application/json')) throw new HttpError(415, 'Send JSON.');
+  c.header('Cache-Control', 'no-store');
+  await next();
+};
+app.use('/api/leagues/:id/claims', localOnly);
+app.use('/api/leagues/:id/claims/*', localOnly);
+app.get('/api/leagues/:id/claims', async c => c.json(await claimInfo(leagueId(c), c.req.query('player') ?? null)));
+app.post('/api/leagues/:id/claims', async c => {
+  const body = await c.req.json().catch(() => null);
+  if (!body || typeof body !== 'object') throw new HttpError(400, 'Invalid claim.');
+  return c.json(await createClaim(leagueId(c), body as ClaimRequest));
+});
+app.delete('/api/leagues/:id/claims/:job', c => c.json(cancelClaim(leagueId(c), c.req.param('job'))));
 app.get('/api/leagues/:id/history', async c => json(c, await views.history(leagueId(c))));
 app.get('/api/leagues/:id/recap', async c => json(c, await views.recap(leagueId(c))));
 app.get('/api/leagues/:id/defense', async c => {

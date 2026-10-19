@@ -33,6 +33,20 @@
         "/SLA2/"
       ],
       "port": 5181
+    },
+    {
+      "name": "sla-api-dry-run",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "SLA_CLAIMS_DRY_RUN=1",
+        "SLA_CLAIMS_FILE=data/claims-dry-run.json",
+        "node",
+        "--watch-path=server",
+        "--watch-path=engine",
+        "--watch-path=model",
+        "server/index.ts"
+      ],
+      "port": 8787
     }
   ]
 }

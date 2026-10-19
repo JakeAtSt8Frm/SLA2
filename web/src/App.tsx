@@ -67,7 +67,8 @@ export function App() {
   }, []);
   const boot = useBootstrap(route.leagueId);
   if (boot.isPending) return <BootScreen />;
-  if (boot.isError) {
+  // Only when there's nothing to show: a failed background refresh keeps the app (and open drawers) as they are.
+  if (boot.isError && !boot.data) {
     return (
       <div className="mx-auto max-w-lg p-6 pt-24">
         <ErrorState error={boot.error} onRetry={() => void boot.refetch()} />

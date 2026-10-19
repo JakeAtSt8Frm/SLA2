@@ -166,3 +166,148 @@ export async function submitMove(c: MoveContext, body: Raw): Promise<MoveResult>
   const res = await espnWrite(`${leagueRoute(c)}/transactions/`, body);
   return readResult(res.status, res.body);
 }
+
+/** Your own waiver claim for this player that ESPN hasn't processed yet, so a restart never places a second one. */
+export async function hasPendingClaim(c: MoveContext, playerId: number): Promise<boolean> {
+  const raw = obj(await espnJson(`${leagueRoute(c)}?view=mTransactions2&scoringPeriodId=${c.scoringPeriodId}`));
+  return arr(raw.transactions).map(obj).some(t => t.type === 'WAIVER' && t.status === 'PENDING' && num(t.teamId) === c.teamId
+    && arr(t.items).map(obj).some(i => i.type === 'ADD' && num(i.playerId) === playerId));
+}
+
+// ─── The claim loop (CLI and the server's auto-claims) ─────────────────────
+
+export interface ClaimSpec {
+  league: string; add: number; drop: number | null; bid: number;
+  keepPriority: boolean;
+  /** Keep going while the player is on another roster (or, with keepPriority, until they clear waivers). */
+  watch: boolean;
+  pollMs?: number;
+}
+
+export type ClaimPhase = 'checking' | 'watching' | 'waiting' | 'sending';
+
+export interface ClaimHooks {
+  log: (msg: string) => void;
+  /** false: log the request that would be sent instead of sending it. */
+  execute: boolean;
+  signal?: AbortSignal;
+  phase?: (phase: ClaimPhase) => void;
+}
+
+export type ClaimOutcome =
+  | { kind: 'added' | 'claimed' | 'already' | 'dry-run'; ok: true; message: string }
+  | { kind: 'not-yet'; ok: true; message: string; until: number | null }
+  | { kind: 'failed' | 'cancelled'; ok: false; message: string };
+
+export const when = (ts: number) => new Date(ts).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+const nap = (ms: number, signal?: AbortSignal) => new Promise<void>(done => {
+  if (signal?.aborted) return done();
+  const t = setTimeout(done, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(t); done(); }, { once: true });
+});
+
+/**
+ * Gets `spec.add` onto your team at the earliest moment ESPN allows: adds a free agent, claims a
+ * player on waivers, and (watching) waits for a drop or for waivers to clear. The drop goes in the
+ * same move. Never retries a send that may have executed; reads the league back instead.
+ */
+export async function runClaim(spec: ClaimSpec, hooks: ClaimHooks): Promise<ClaimOutcome> {
+  const { log, signal } = hooks;
+  const poll = Math.max(10_000, spec.pollMs ?? 30_000);
+  const cancelled = (): ClaimOutcome => ({ kind: 'cancelled', ok: false, message: 'Cancelled' });
+  const failed = (message: string): ClaimOutcome => ({ kind: 'failed', ok: false, message });
+  let ctx = await moveContext(spec.league);
+  let ctxAt = Date.now();
+  const room = (c: MoveContext) => (openSpots(c) <= 0 && spec.drop === null ? `Your roster is full (${c.rosterLimit} players, not counting IR). Choose who to drop.` : null);
+  const dropOf = (c: MoveContext) => (spec.drop === null ? null : c.roster.find(r => r.playerId === spec.drop) ?? null);
+  if (room(ctx)) return failed(room(ctx)!);
+  if (spec.drop !== null && !dropOf(ctx)) return failed(`The player to drop is no longer on ${ctx.teamName}.`);
+
+  /** Rebuilt right before sending: the drop's lineup slot and the scoring period may have changed. */
+  async function send(type: 'FREEAGENT' | 'WAIVER', name: string): Promise<ClaimOutcome | string> {
+    hooks.phase?.('sending');
+    ctx = await moveContext(spec.league);
+    ctxAt = Date.now();
+    if (room(ctx)) return failed(room(ctx)!);
+    const drop = dropOf(ctx);
+    if (spec.drop !== null && !drop) return failed(`The player to drop is no longer on ${ctx.teamName}.`);
+    if (type === 'WAIVER' && await hasPendingClaim(ctx, spec.add)) return { kind: 'claimed', ok: true, message: `Your waiver claim for ${name} is already pending.` };
+    const body = moveBody(ctx, type, spec.add, drop, ctx.budget ? spec.bid : 0);
+    if (!hooks.execute) {
+      log(`Would send this ${type === 'WAIVER' ? 'waiver claim' : 'free-agent add'}:\n${JSON.stringify(body, null, 2)}`);
+      return { kind: 'dry-run', ok: true, message: 'Dry run: nothing was sent.' };
+    }
+    let result: MoveResult;
+    try {
+      result = await submitMove(ctx, body);
+    } catch (error) {
+      // No retry: a request that timed out may still have gone through. Read back what happened.
+      const [now] = await playerStates(ctx, [spec.add]).catch(() => []);
+      if (now?.onTeamId === ctx.teamId) return { kind: 'added', ok: true, message: `${name} is on your team.` };
+      if (type === 'WAIVER' && await hasPendingClaim(ctx, spec.add).catch(() => false)) return { kind: 'claimed', ok: true, message: `Waiver claim for ${name} placed.` };
+      return failed(`Couldn't confirm the move (${(error as Error).message}). Check ESPN before trying again.`);
+    }
+    if (!result.ok) {
+      log(`ESPN rejected the ${type === 'WAIVER' ? 'claim' : 'add'} (${result.status}): ${result.message}`);
+      return result.message;
+    }
+    return type === 'WAIVER'
+      ? { kind: 'claimed', ok: true, message: `Waiver claim for ${name} placed${drop ? `, dropping ${drop.name}` : ''} (${result.state}).` }
+      : { kind: 'added', ok: true, message: `Added ${name}${drop ? `, dropped ${drop.name}` : ''} (${result.state}).` };
+  }
+
+  let lastNote = '', lastKind = '', lastRejection = '', rejections = 0, readErrors = 0;
+  const note = (msg: string) => { if (msg !== lastNote) log(msg); lastNote = msg; };
+  for (;;) {
+    if (signal?.aborted) return cancelled();
+    hooks.phase?.('checking');
+    let state: PlayerState | undefined;
+    try {
+      // Long watches cross weeks: refresh the scoring period now and then.
+      if (Date.now() - ctxAt > 30 * 60_000) { ctx = await moveContext(spec.league); ctxAt = Date.now(); }
+      [state] = await playerStates(ctx, [spec.add]);
+      readErrors = 0;
+    } catch (error) {
+      // A long watch outlives ESPN hiccups; a rejected login doesn't fix itself.
+      const status = (error as { status?: number }).status;
+      if (status === 401 || status === 403 || ++readErrors >= 20) return failed((error as Error).message);
+      note(`Couldn't reach ESPN (${(error as Error).message}); retrying.`);
+      await nap(poll, signal);
+      continue;
+    }
+    if (!state) return failed('ESPN returned nothing for this player.');
+    const step = nextStep(state, ctx, { keepPriority: spec.keepPriority });
+    if (step.kind === 'watch' && lastKind === 'wait') return failed(`${state.name} was claimed off waivers by another team.`);
+    lastKind = step.kind;
+    if (step.kind === 'done') return { kind: 'already', ok: true, message: step.reason };
+    if (step.kind === 'add' || step.kind === 'claim') {
+      if (step.kind === 'claim') log(`${state.name} is on waivers${step.processAt ? ` until ${when(step.processAt)}` : ''}; placing a claim.`);
+      const sent = await send(step.kind === 'add' ? 'FREEAGENT' : 'WAIVER', state.name);
+      if (typeof sent !== 'string') return sent;
+      // Rejected (game locked, roster rules, …): keep trying while watching, unless ESPN keeps giving the same reason.
+      rejections = sent === lastRejection ? rejections + 1 : 1;
+      lastRejection = sent;
+      if (!spec.watch || rejections >= 3) return failed(`ESPN rejected the move: ${sent}`);
+      await nap(poll, signal);
+      continue;
+    }
+    if (!spec.watch) {
+      return step.kind === 'wait'
+        ? { kind: 'not-yet', ok: true, message: `${state.name} clears waivers ${when(step.until)}.`, until: step.until }
+        : { kind: 'not-yet', ok: true, message: `${step.reason}.`, until: null };
+    }
+    if (step.kind === 'wait') {
+      hooks.phase?.('waiting');
+      const left = step.until - Date.now();
+      note(`Waiting for ${state.name} to clear waivers at ${when(step.until)}.`);
+      // Short naps so a sleeping laptop catches up when it wakes; every few seconds near the time; then
+      // every 10 s, since ESPN's waiver run can start up to an hour after the scheduled time.
+      await nap(left > 60_000 ? Math.min(left - 30_000, 5 * 60_000) : left > 0 ? 3000 : 10_000, signal);
+      continue;
+    }
+    hooks.phase?.('watching');
+    note(`${step.reason}; checking every ${poll / 1000}s.`);
+    await nap(poll, signal);
+  }
+}

@@ -1,10 +1,11 @@
 import { useDeferredValue, useMemo, useState } from 'react';
 import { ArrowRight, Search, TrendingUp } from 'lucide-react';
-import { useWaivers, type Waivers } from '../lib/api.ts';
+import { CLAIMS_AVAILABLE, useWaivers, type Waivers } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { fmt, pct, posLabel } from '../lib/format.ts';
 import { Button, Card, CardHeader, Empty, ErrorState, InfoTip, Injury, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Segmented, Stat, cx, useSort } from '../components/ui.tsx';
 import { Sparkline } from '../charts/charts.tsx';
+import { AutoClaims } from '../components/ClaimPanel.tsx';
 
 export default function WaiversPage() {
   const { leagueId, myTeamId, teamName, boot, teams } = useApp();
@@ -31,6 +32,7 @@ export default function WaiversPage() {
           <Stat label="Pickups that help you" value={String(w.recommendations.length)} sub={`of ${w.availableCount} available`} />
         </div>
       </Card>
+      <AutoClaims />
       <FreeAgents rows={w.freeAgents} total={w.availableCount} />
       <Recommendations recs={w.recommendations} faab={mode === 'faab'} />
     </div>
@@ -38,7 +40,8 @@ export default function WaiversPage() {
 }
 
 function Recommendations({ recs, faab }: { recs: Waivers['recommendations']; faab: boolean }) {
-  const { boot } = useApp();
+  const { boot, openPlayer } = useApp();
+  const claimable = boot.league.platform === 'espn' && CLAIMS_AVAILABLE;
   const [shown, setShown] = useState(10);
   if (!recs.length) return <Card><Empty title="No free agent improves your lineup">Your roster is deeper than the wire at every slot. Nice.</Empty></Card>;
   return (
@@ -54,6 +57,7 @@ function Recommendations({ recs, faab }: { recs: Waivers['recommendations']; faa
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-ink-2"><span className="text-[11px] font-semibold uppercase tracking-wide text-bad-ink">Drop</span><Pos pos={r.drop.pos} /><PlayerLink id={r.drop.id} name={r.drop.name} className="font-normal text-ink-2" /><span className="num text-[12px] text-ink-3">{r.dropCost < 0.1 ? 'no lineup impact' : `costs ${fmt(r.dropCost)} pts`}</span></div>
               ) : <div className="mt-1 text-[12px] text-ink-3">Open roster spot, no drop needed</div>}
               {r.player.trending > 0 && <div className="mt-1 inline-flex items-center gap-1 text-[12px] text-ink-3"><TrendingUp size={12} aria-hidden />{r.player.trending.toLocaleString('en-US')} adds on Sleeper (48h)</div>}
+              {claimable && <div className="mt-2"><Button size="sm" onClick={() => openPlayer(r.id, r.drop?.id)}>Claim{r.drop ? `, drop ${r.drop.name}` : ''}…</Button></div>}
             </div>
             <div className={cx('grid gap-2', faab ? 'grid-cols-3' : 'grid-cols-2')}>
               <div><div className="text-[11px] text-ink-3">Net ROS</div><div className="num text-[17px] font-semibold text-good-ink">+{fmt(r.netGain)}</div></div>
