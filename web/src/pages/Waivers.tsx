@@ -129,7 +129,7 @@ function FreeAgents({ rows, total, shown, weeks, opponents }: { rows: Ready['fre
           <label className="relative flex min-w-[200px] flex-1 items-center sm:max-w-xs">
             <Search size={15} className="pointer-events-none absolute left-3 text-ink-3" aria-hidden />
             <span className="sr-only">Search available players</span>
-            <input value={text} onChange={e => { setText(e.target.value); setLimit(PAGE); }} placeholder="Search name or NFL team" className="h-9 w-full rounded-[9px] border border-line-strong bg-surface pl-9 pr-3 text-[14px] placeholder:text-ink-3" />
+            <input value={text} onChange={e => { setText(e.target.value); setLimit(PAGE); }} placeholder="Search name or NFL team" className="h-9 w-full rounded-[9px] border border-line-strong bg-surface pl-9 pr-3 text-[16px] placeholder:text-ink-3" />
           </label>
           <Segmented label="Position" value={pos} onChange={v => { setPos(v); setLimit(PAGE); }} options={['ALL', ...boot.league.positions].map(p => ({ value: p, label: posLabel(p, boot.league.platform) }))} />
         </div>

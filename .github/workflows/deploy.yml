@@ -72,6 +72,10 @@ jobs:
           SLA_SITE_URL: ${{ steps.pages.outputs.base_url }}
           # ESPN claims from the site run as .github/workflows/claim.yml in this repository.
           VITE_GITHUB_REPO: ${{ github.repository }}
+          # Claims need no per-device token setup when the CLAIM_TOKEN secret is set (a fine-grained
+          # Actions token for this repo). Note: baked into a static build, it is public to everyone
+          # who can open the site.
+          VITE_GITHUB_TOKEN: ${{ secrets.CLAIM_TOKEN }}
           # Optional: ESPN cookies as repository secrets instead of config/espn.json.
           ESPN_SWID: ${{ secrets.ESPN_SWID }}
           ESPN_S2: ${{ secrets.ESPN_S2 }}

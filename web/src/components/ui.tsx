@@ -99,7 +99,7 @@ export function Select<T extends string | number>({ value, onChange, options, la
           const match = options.find(o => String(o.value) === raw);
           if (match) onChange(match.value);
         }}
-        className="h-9 w-full appearance-none rounded-[9px] border border-line-strong bg-surface pl-3 pr-8 text-[14px] text-ink hover:bg-surface-2"
+        className="h-9 w-full appearance-none rounded-[9px] border border-line-strong bg-surface pl-3 pr-8 text-[16px] text-ink hover:bg-surface-2"
       >
         {options.map(o => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}
       </select>
@@ -132,12 +132,16 @@ export function RankPill({ rank, kind }: { rank: { rank: number; outOf: number }
   const hue = t < 0.5
     ? `color-mix(in oklab, var(--ryg-low) ${Math.round((1 - t * 2) * 100)}%, var(--ryg-mid))`
     : `color-mix(in oklab, var(--ryg-mid) ${Math.round((1 - (t - 0.5) * 2) * 100)}%, var(--ryg-high))`;
+  const tip = useChipTip(`Position rank ${rank.rank} of ${rank.outOf} by ${kind === 'PPG' ? 'points per game' : 'total points'}`);
   return (
-    <span title={`Position rank ${rank.rank} of ${rank.outOf} by ${kind === 'PPG' ? 'points per game' : 'total points'}`}
-      className="num inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-[5px] px-1.5 text-[10px] font-semibold text-ink"
-      style={{ background: `color-mix(in oklab, ${hue} 38%, var(--surface))` }}>
-      #{rank.rank}<span className="font-medium text-ink-2">{kind === 'PPG' ? 'PPG' : 'Tot'}</span>
-    </span>
+    <>
+      <span {...tip.handlers}
+        className="num inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-[5px] px-1.5 text-[10px] font-semibold text-ink"
+        style={{ background: `color-mix(in oklab, ${hue} 38%, var(--surface))` }}>
+        #{rank.rank}<span className="font-medium text-ink-2">{kind === 'PPG' ? 'PPG' : 'Tot'}</span>
+      </span>
+      {tip.node}
+    </>
   );
 }
 
@@ -190,12 +194,16 @@ export function Injury({ status }: { status: string | null | undefined }) {
   if (!status) return null;
   const severe = ['Out', 'IR', 'PUP', 'Sus', 'NA', 'DNR', 'NFI', 'COV'].includes(status);
   const color = severe ? 'var(--bad)' : status === 'Doubtful' ? 'var(--serious)' : 'var(--warn)';
+  const tip = useChipTip(status);
   return (
-    <span title={status} className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded-[5px] px-1.5 text-[10px] font-bold text-ink"
-      style={{ background: `color-mix(in oklab, ${color} 20%, transparent)`, boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${color} 45%, transparent)` }}>
-      <CircleAlert size={10} aria-hidden style={{ color }} />
-      {INJURY_SHORT[status] ?? status}
-    </span>
+    <>
+      <span {...tip.handlers} className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded-[5px] px-1.5 text-[10px] font-bold text-ink"
+        style={{ background: `color-mix(in oklab, ${color} 20%, transparent)`, boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${color} 45%, transparent)` }}>
+        <CircleAlert size={10} aria-hidden style={{ color }} />
+        {INJURY_SHORT[status] ?? status}
+      </span>
+      {tip.node}
+    </>
   );
 }
 
@@ -276,6 +284,25 @@ export function useTooltip() {
       {tip.content}
     </div>, document.body) : null;
   return { show: (e: { clientX: number; clientY: number }, content: ReactNode) => setTip({ x: e.clientX, y: e.clientY, content }), hide: () => setTip(null), node };
+}
+
+/** Native title semantics that also work on touch: hover shows, tap pins, tapping again unpins. */
+export function useChipTip(text: ReactNode) {
+  const tip = useTooltip();
+  const [pinned, setPinned] = useState(false);
+  return {
+    handlers: {
+      onMouseEnter: (e: React.MouseEvent) => tip.show(e, text),
+      onMouseMove: (e: React.MouseEvent) => tip.show(e, text),
+      onMouseLeave: () => { if (!pinned) tip.hide(); },
+      onPointerDown: (e: React.PointerEvent) => {
+        if (e.pointerType !== 'touch') return;
+        if (pinned) { setPinned(false); tip.hide(); } else { setPinned(true); tip.show(e, text); }
+      },
+      onPointerCancel: () => { setPinned(false); tip.hide(); },
+    },
+    node: tip.node,
+  };
 }
 
 export function InfoTip({ children }: { children: ReactNode }) {

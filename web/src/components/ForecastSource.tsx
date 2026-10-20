@@ -1,4 +1,5 @@
 import type { PregameEstimate } from '../../../engine/forecast.ts';
+import { useChipTip } from './ui.tsx';
 
 const descriptions = {
   saved: 'Forecast saved before kickoff, with its timestamp verified against the game schedule.',
@@ -9,5 +10,11 @@ const descriptions = {
 export function ForecastSource({ source, savedAt }: { source: PregameEstimate['source'] | null; savedAt: number | null }) {
   if (!source) return null;
   const timestamp = savedAt === null ? '' : ` Saved ${new Date(savedAt).toLocaleString()}.`;
-  return <span className="block text-[10px] font-medium leading-snug text-ink-3" title={`${descriptions[source]}${timestamp}`}>{source === 'saved' ? 'Saved' : source === 'replay' ? 'Replay' : 'Current'}</span>;
+  const tip = useChipTip(`${descriptions[source]}${timestamp}`);
+  return (
+    <>
+      <span {...tip.handlers} className="block text-[10px] font-medium leading-snug text-ink-3">{source === 'saved' ? 'Saved' : source === 'replay' ? 'Replay' : 'Current'}</span>
+      {tip.node}
+    </>
+  );
 }

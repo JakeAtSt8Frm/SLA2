@@ -62,6 +62,20 @@ describe('legal waiver gains', () => {
     expect(recommendation.dropId).toBe('QB');
     expect(recommendation.netGain).toBe(10);
   });
+
+  it('anchors FAAB guidance to observed clearing prices, not raw value', () => {
+    const players = { starter: player('starter', ['QB']), pickup: player('pickup', ['QB']) };
+    const args = {
+      ...waiverDefaults, roster: ['starter', 'bench'], rosterLimit: 3, slots: ['QB', 'QB'],
+      players, forecasts: new Map([[3, weekly(3, { starter: 30, bench: 5, pickup: 20 })], [4, weekly(4, { starter: 30, bench: 5, pickup: 20 })]]),
+      weeks: [3, 4], currentWeek: 3, freeAgents: ['pickup'], faabBudget: 100,
+      recentBids: [{ week: 1, amount: 40 }, { week: 2, amount: 20 }, { week: 3, amount: 30 }, { week: 3, amount: 10 }],
+    };
+    const [recommendation] = waiverRecommendations(args);
+    expect(recommendation).toBeDefined();
+    expect(recommendation.faab).toEqual({ low: 20, high: 31 }); // q25=20 → low; max(median+1, q75)=31 → high
+    expect(recommendation.reasons.some(s => s.includes('median bid 30% of budget'))).toBe(true);
+  });
 });
 
 describe('lineup identities', () => {

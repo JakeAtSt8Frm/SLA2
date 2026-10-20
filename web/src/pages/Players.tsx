@@ -34,7 +34,7 @@ export default function PlayersPage() {
         <label className="relative flex min-w-[220px] flex-1 items-center sm:max-w-xs">
           <Search size={15} className="pointer-events-none absolute left-3 text-ink-3" aria-hidden />
           <span className="sr-only">Search players</span>
-          <input value={text} onChange={e => { setText(e.target.value); setLimit(100); }} placeholder="Search name or NFL team" className="h-9 w-full rounded-[9px] border border-line-strong bg-surface pl-9 pr-3 text-[14px] placeholder:text-ink-3" />
+          <input value={text} onChange={e => { setText(e.target.value); setLimit(100); }} placeholder="Search name or NFL team" className="h-9 w-full rounded-[9px] border border-line-strong bg-surface pl-9 pr-3 text-[16px] placeholder:text-ink-3" />
         </label>
         <Segmented label="Position" value={pos} onChange={v => { setPos(v); setLimit(100); }} options={['ALL', ...boot.league.positions].map(p => ({ value: p, label: posLabel(p, boot.league.platform) }))} />
         <Select<Avail> label="Availability" value={activeAvail} onChange={v => { setAvail(v); setLimit(100); }} options={[{ value: 'all', label: 'All players' }, { value: 'fa', label: 'Free agents' }, { value: 'rostered', label: 'Rostered' }, ...(myTeamId !== null ? [{ value: 'mine' as Avail, label: 'My team' }] : [])]} className="w-40" />

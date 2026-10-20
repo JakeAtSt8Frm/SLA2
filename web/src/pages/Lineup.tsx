@@ -40,6 +40,43 @@ export default function LineupPage() {
         <Card className="flex items-center gap-3"><Check className="text-good" aria-hidden /><div className="font-semibold">Lineup is optimal.</div></Card>
       )}
 
+      {l.winMax && l.winMax.some((r, i) => (r?.id ?? null) !== (l.optimal[i]?.id ?? null)) && (
+        <Card pad={false}>
+          <div className="px-4 pt-4 sm:px-5">
+            <CardHeader
+              title="Chase the win"
+              subtitle="Same slots, picks chosen for win probability against your opponent's set lineup instead of raw points — the edge it finds is usually a boom-or-bust swap."
+            />
+            {l.odds?.winMax != null && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px]">
+                <span className="text-ink-2">Win odds:</span>
+                <span className="num">{prob(l.odds.asSet)}</span><span className="text-ink-3">as set</span>
+                <span className="text-ink-3">·</span>
+                <span className="num">{prob(l.odds.optimized)}</span><span className="text-ink-3">points-optimal</span>
+                <span className="text-ink-3">·</span>
+                <span className="num font-semibold text-good-ink">{prob(l.odds.winMax)}</span><span className="text-ink-3">this chase</span>
+              </div>
+            )}
+          </div>
+          <ul>
+            {l.winMax.map((r, i) => {
+              const changed = (r?.id ?? null) !== (l.optimal[i]?.id ?? null);
+              return (
+                <li key={i} className={cx('grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-2 border-t border-line px-4 py-2 text-[13px]', changed && 'bg-[color-mix(in_oklab,var(--good)_7%,transparent)]')}>
+                  <span className="text-[12px] font-semibold text-ink-3">{slotLabel(l.slots[i])}</span>
+                  <span className="min-w-0">
+                    <PlayerCell r={r} />
+                    {changed && <span className="mt-0.5 text-[11px] text-ink-3">differs from the points-optimal pick</span>}
+                  </span>
+                  <span className="num text-right font-semibold">{r?.week ? fmt(r.week.exp) : '—'}</span>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="border-t border-line px-4 py-2.5 text-[12px] text-ink-3 sm:px-5">Expected total {fmt(l.winMaxTotal)} pts · ± {fmt(l.winMaxSd, 0)} sd. Only shown when the win-odds best lineup beats the points-optimal one.</div>
+        </Card>
+      )}
+
       <Card pad={false}>
         <div className="px-4 pt-4 sm:px-5"><CardHeader title="Lineup" subtitle={changes ? 'Recommended lineup; changes highlighted' : undefined} /></div>
         {/* Phones: the recommended lineup as a list, each change noted under the player it brings in. */}

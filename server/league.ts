@@ -13,7 +13,7 @@ import { sourceFor, type LeagueExtras, type Platform } from './source.ts';
 import { defenseRows, fitDefenseModel, type DefenseModel } from '../engine/dst.ts';
 import { FeatureState } from '../engine/features.ts';
 import { pregameForecast, replayForecast, withLiveState, type ForecastEnv, type PregameEstimate, type PregamePoint, type WeekForecast } from '../engine/forecast.ts';
-import { adviseLineup, bestLineup, startable, type LineupAdvice, type TeamLineup } from '../engine/lineup.ts';
+import { groupOfPlayer, adviseLineup, bestLineup, startable, opponentEntries, type LineupAdvice, type TeamLineup } from '../engine/lineup.ts';
 import { ProjectionModel, type ModelFile } from '../engine/model.ts';
 import { starterSlots } from '../engine/positions.ts';
 import { buildTeamWeeks, summarizeSeason, type SeasonSummary, type TeamWeek } from '../engine/recap.ts';
@@ -450,6 +450,8 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
   });
 
   // Lineups: current-week advice (with locks) and best lineup every remaining week.
+  // Shared game-environment groups: same-NFL-team (and same-game) starters co-move in the sims.
+  const groupOf = (w: number) => groupOfPlayer(players, gameFor, w);
   const advice = new Map<number, LineupAdvice>();
   const bestByWeek = new Map<string, TeamLineup>();
   for (const t of teams) {
@@ -458,11 +460,13 @@ async function computeCore(id: string, input: Inputs): Promise<LeagueCore> {
       const current = forecasts.get(week)!;
       const liveStarters = schedule[week - 1]?.find(m => m.rosterId === t.rosterId)?.starters;
       const starters = liveStarters?.length ? liveStarters : t.roster.starters;
-      advice.set(t.rosterId, adviseLineup(slots, starters, active, players, current, isLocked));
+      const me = schedule[week - 1]?.find(m => m.rosterId === t.rosterId);
+      const oppRow = me && me.matchupId !== null ? schedule[week - 1]?.find(m => m.matchupId === me.matchupId && m.rosterId !== t.rosterId) : undefined;
+      advice.set(t.rosterId, adviseLineup(slots, starters, active, players, current, isLocked, groupOf(week), opponentEntries(oppRow?.starters ?? [], current, groupOf(week))));
     }
     for (const w of horizon) {
       if (w === week) { bestByWeek.set(`${t.rosterId}:${w}`, advice.get(t.rosterId)!.optimal); continue; }
-      bestByWeek.set(`${t.rosterId}:${w}`, bestLineup(slots, active, players, forecasts.get(w)!));
+      bestByWeek.set(`${t.rosterId}:${w}`, bestLineup(slots, active, players, forecasts.get(w)!, groupOf(w)));
     }
     await tick();
   }

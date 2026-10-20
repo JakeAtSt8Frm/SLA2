@@ -252,7 +252,8 @@ function LeagueDialog({ onClose }: { onClose: () => void }) {
   // Portal: the sticky, blurred header is its own stacking context and would trap the overlay beneath the page.
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--overlay)] p-4 pt-[12vh]" onClick={onClose}>
-      <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Switch league" className="card w-full max-w-md p-5 fade-in" onClick={e => e.stopPropagation()}>
+      {/* Caps the dialog under the keyboard/viewport (iOS zooms while typing in the finder) and scrolls inside. */}
+      <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Switch league" className="card max-h-[min(70vh,32rem)] w-full max-w-md overflow-y-auto overscroll-contain p-5 fade-in" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-[16px] font-semibold">Switch league</h2>
           <button onClick={onClose} className="rounded-md p-1 text-ink-3 hover:bg-surface-2" aria-label="Close"><X size={18} /></button>
@@ -312,7 +313,7 @@ function LeagueFinder({ onDone }: { onDone: () => void }) {
     <div className="w-full">
       <form onSubmit={e => { e.preventDefault(); void submit(); }} className="flex gap-2">
         <input value={input} onChange={e => setInput(e.target.value)} placeholder="Sleeper username or league ID" aria-label="Sleeper username or league ID"
-          className="h-9 min-w-0 flex-1 rounded-[9px] border border-line-strong bg-surface px-3 text-[14px] placeholder:text-ink-3" />
+          className="h-9 min-w-0 flex-1 rounded-[9px] border border-line-strong bg-surface px-3 text-[16px] placeholder:text-ink-3" />
         <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Finding…' : 'Go'}</Button>
       </form>
       {error && <p className="mt-2 text-[13px] text-bad-ink">{error}</p>}

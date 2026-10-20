@@ -79,6 +79,8 @@ export function ScoreDistribution({ hist, a, b, nameA, nameB }: {
   const [ref, width] = useWidth<HTMLDivElement>(520);
   const tip = useTooltip();
   const [hover, setHover] = useState<number | null>(null);
+  // Pinned while a phone user is reading the tip: set on tap, cleared by tapping the same spot again.
+  const [pinned, setPinned] = useState<number | null>(null);
   const [colorA, colorB] = pairColors(a, b);
   const H = 150, pad = { l: 8, r: 8, t: 10, b: 24 };
   const n = hist.a.length;
@@ -89,19 +91,31 @@ export function ScoreDistribution({ hist, a, b, nameA, nameB }: {
   const path = (arr: number[]) => arr.map((p, i) => `${i ? 'L' : 'M'}${x(hist.lo + (i + 0.5) * binW).toFixed(1)},${y(p).toFixed(1)}`).join('');
   const area = (arr: number[]) => `${path(arr)}L${x(hist.lo + (n - 0.5) * binW)},${y(0)}L${x(hist.lo + 0.5 * binW)},${y(0)}Z`;
   const ticks = niceTicks(hist.lo, hist.hi, Math.max(3, Math.floor(width / 110)));
-  const onMove = (e: React.PointerEvent<SVGRectElement>) => {
+  const content = (i: number) => (
+    <div className="space-y-1">
+      <div className="text-ink-3">{fmt(hist.lo + i * binW, 0)}–{fmt(hist.lo + (i + 1) * binW, 0)} pts</div>
+      <TipRow color={colorA} label={nameA} value={`${(hist.a[i] * 100).toFixed(1)}%`} />
+      <TipRow color={colorB} label={nameB} value={`${(hist.b[i] * 100).toFixed(1)}%`} />
+    </div>
+  );
+  const nearest = (e: React.PointerEvent<SVGRectElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - rect.left;
-    const i = Math.max(0, Math.min(n - 1, Math.floor(((px - pad.l) / (width - pad.l - pad.r)) * n)));
+    return Math.max(0, Math.min(n - 1, Math.floor(((px - pad.l) / (width - pad.l - pad.r)) * n)));
+  };
+  const onMove = (e: React.PointerEvent<SVGRectElement>) => {
+    if (e.pointerType === 'touch' && pinned === null) return; // taps pin, drags scroll the page
+    const i = nearest(e);
     setHover(i);
-    const from = hist.lo + i * binW;
-    tip.show(e, (
-      <div className="space-y-1">
-        <div className="text-ink-3">{fmt(from, 0)}–{fmt(from + binW, 0)} pts</div>
-        <TipRow color={colorA} label={nameA} value={`${(hist.a[i] * 100).toFixed(1)}%`} />
-        <TipRow color={colorB} label={nameB} value={`${(hist.b[i] * 100).toFixed(1)}%`} />
-      </div>
-    ));
+    tip.show(e, content(i));
+  };
+  const onDown = (e: React.PointerEvent<SVGRectElement>) => {
+    const i = nearest(e);
+    if (pinned !== null) { if (pinned === i) { setPinned(null); setHover(null); tip.hide(); } else { setPinned(i); setHover(i); tip.show(e, content(i)); } return; }
+    if (e.pointerType !== 'touch') return;
+    setPinned(i);
+    setHover(i);
+    tip.show(e, content(i));
   };
   return (
     <div ref={ref} className="w-full min-w-0">
@@ -119,7 +133,9 @@ export function ScoreDistribution({ hist, a, b, nameA, nameB }: {
           </g>
         ))}
         {hover !== null && <line x1={x(hist.lo + (hover + 0.5) * binW)} x2={x(hist.lo + (hover + 0.5) * binW)} y1={pad.t} y2={y(0)} stroke="var(--ink-3)" strokeWidth={1} />}
-        <rect x={0} y={0} width={width} height={H} fill="transparent" onPointerMove={onMove} onPointerLeave={() => { setHover(null); tip.hide(); }} />
+        <rect x={0} y={0} width={width} height={H} fill="transparent" onPointerMove={onMove}
+          onPointerDown={onDown}
+          onPointerLeave={() => { if (pinned !== null) return; setHover(null); tip.hide(); }} onPointerCancel={() => { setPinned(null); setHover(null); tip.hide(); }} />
       </svg>
       <div className="mt-1 flex flex-wrap gap-4 text-[12px] text-ink-2">
         <span className="inline-flex items-center gap-1.5"><span className="h-[2px] w-3 rounded" style={{ background: colorA }} />{nameA}</span>
@@ -134,6 +150,7 @@ export function ScoreDistribution({ hist, a, b, nameA, nameB }: {
 
 export function Sparkline({ points, width = 96, height = 26, color = 'var(--accent)', label }: { points: [number, number][]; width?: number; height?: number; color?: string; label?: string }) {
   const tip = useTooltip();
+  const [pinned, setPinned] = useState(false);
   if (points.length < 2) return <span className="text-[12px] text-ink-3">{points.length ? fmt(points[0][1]) : '—'}</span>;
   const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(0, ...ys), maxY = Math.max(...ys, 1);
@@ -141,16 +158,25 @@ export function Sparkline({ points, width = 96, height = 26, color = 'var(--acce
   const y = (v: number) => 4 + (1 - (v - minY) / (maxY - minY || 1)) * (height - 8);
   const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join('');
   const last = points[points.length - 1];
+  const nearest = (e: React.PointerEvent<SVGSVGElement>) =>
+    points.reduce((best, p) => (Math.abs(x(p[0]) - (e.clientX - e.currentTarget.getBoundingClientRect().left)) < Math.abs(x(best[0]) - (e.clientX - e.currentTarget.getBoundingClientRect().left)) ? p : best), points[0]);
   return (
     <>
       <svg width={width} height={height} role="img" aria-label={label ?? `Weekly points: ${ys.map(v => fmt(v)).join(', ')}`}
         onPointerMove={e => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          const px = e.clientX - rect.left;
-          const nearest = points.reduce((best, p) => (Math.abs(x(p[0]) - px) < Math.abs(x(best[0]) - px) ? p : best), points[0]);
-          tip.show(e, <span>Week {nearest[0]}: <b className="num">{fmt(nearest[1])}</b> pts</span>);
+          if (e.pointerType === 'touch' && !pinned) return; // taps pin, drags scroll the page
+          const p = nearest(e);
+          tip.show(e, <span>Week {p[0]}: <b className="num">{fmt(p[1])}</b> pts</span>);
         }}
-        onPointerLeave={tip.hide}>
+        onPointerDown={e => {
+          if (e.pointerType !== 'touch') return;
+          if (pinned) { setPinned(false); tip.hide(); return; }
+          setPinned(true);
+          const p = nearest(e);
+          tip.show(e, <span>Week {p[0]}: <b className="num">{fmt(p[1])}</b> pts</span>);
+        }}
+        onPointerLeave={() => { if (pinned) return; tip.hide(); }}
+        onPointerCancel={() => { setPinned(false); tip.hide(); }}>
         <path d={d} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
         <circle cx={x(last[0])} cy={y(last[1])} r={3.5} fill={color} stroke="var(--surface)" strokeWidth={2} />
       </svg>
@@ -163,20 +189,27 @@ export function Sparkline({ points, width = 96, height = 26, color = 'var(--acce
 
 export function RangeBar({ floor, median, ceiling, expected, max, width = 120 }: { floor: number; median: number; ceiling: number; expected: number; max: number; width?: number }) {
   const tip = useTooltip();
+  const [pinned, setPinned] = useState(false);
   const h = 16, pad = 3;
   const x = (v: number) => pad + (Math.max(0, Math.min(max, v)) / (max || 1)) * (width - pad * 2);
+  const content = (
+    <div className="space-y-0.5">
+      <TipRow color="var(--accent)" label="Expected" value={fmt(expected)} line={false} />
+      <div className="flex justify-between gap-4 text-ink-2"><span>Floor (10th pct)</span><span className="num font-semibold text-ink">{fmt(floor)}</span></div>
+      <div className="flex justify-between gap-4 text-ink-2"><span>Median</span><span className="num font-semibold text-ink">{fmt(median)}</span></div>
+      <div className="flex justify-between gap-4 text-ink-2"><span>Ceiling (90th pct)</span><span className="num font-semibold text-ink">{fmt(ceiling)}</span></div>
+    </div>
+  );
   return (
     <>
       <svg width={width} height={h} role="img" aria-label={`Range ${fmt(floor)} to ${fmt(ceiling)}, expected ${fmt(expected)}`}
-        onPointerMove={e => tip.show(e, (
-          <div className="space-y-0.5">
-            <TipRow color="var(--accent)" label="Expected" value={fmt(expected)} line={false} />
-            <div className="flex justify-between gap-4 text-ink-2"><span>Floor (10th pct)</span><span className="num font-semibold text-ink">{fmt(floor)}</span></div>
-            <div className="flex justify-between gap-4 text-ink-2"><span>Median</span><span className="num font-semibold text-ink">{fmt(median)}</span></div>
-            <div className="flex justify-between gap-4 text-ink-2"><span>Ceiling (90th pct)</span><span className="num font-semibold text-ink">{fmt(ceiling)}</span></div>
-          </div>
-        ))}
-        onPointerLeave={tip.hide}>
+        onPointerMove={e => { if (e.pointerType === 'touch' && !pinned) return; tip.show(e, content); }}
+        onPointerDown={e => {
+          if (e.pointerType !== 'touch') return;
+          if (pinned) { setPinned(false); tip.hide(); } else { setPinned(true); tip.show(e, content); }
+        }}
+        onPointerLeave={() => { if (pinned) return; tip.hide(); }}
+        onPointerCancel={() => { setPinned(false); tip.hide(); }}>
         <line x1={pad} x2={width - pad} y1={h / 2} y2={h / 2} stroke="var(--grid)" strokeWidth={1} />
         <rect x={x(floor)} y={h / 2 - 3} width={Math.max(2, x(ceiling) - x(floor))} height={6} rx={3} fill="var(--accent)" opacity={0.22} />
         <line x1={x(median)} x2={x(median)} y1={h / 2 - 5} y2={h / 2 + 5} stroke="var(--ink-2)" strokeWidth={1.5} />
@@ -197,6 +230,7 @@ export function TrendChart({ series, labels, highlight, height = 220, yLabel, in
   const [ref, width] = useWidth<HTMLDivElement>(600);
   const tip = useTooltip();
   const [hover, setHover] = useState<number | null>(null);
+  const [pinned, setPinned] = useState<number | null>(null);
   const pad = { l: 34, r: 90, t: 12, b: 26 };
   const all = series.flatMap(s => s.values.filter((v): v is number => v !== null));
   const [minY, maxY] = yDomain ?? [Math.min(...all, 0), Math.max(...all, 1)];
@@ -213,19 +247,33 @@ export function TrendChart({ series, labels, highlight, height = 220, yLabel, in
     vals.forEach((v, i) => { if (v === null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`; pen = true; });
     return d;
   };
-  const onMove = (e: React.PointerEvent<SVGRectElement>) => {
+  const content = (i: number) => (
+    <div className="space-y-1">
+      <div className="text-ink-3">{typeof labels[i] === 'number' ? `Week ${labels[i]}` : labels[i]}</div>
+      {series.map(s => ({ s, v: s.values[i] })).filter(r => r.v !== null && r.v !== undefined).sort((a, b) => (invert ? a.v! - b.v! : b.v! - a.v!))
+        .map(r => <TipRow key={r.s.id} color={hl.has(r.s.id) ? teamColor(r.s.id) : 'var(--ink-3)'} label={r.s.name} value={fmt(r.v, invert ? 0 : 1)} />)}
+    </div>
+  );
+  const nearest = (e: React.PointerEvent<SVGRectElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - rect.left;
     let i = 0, best = Infinity;
     labels.forEach((_, k) => { const dist = Math.abs(x(k) - px); if (dist < best) { best = dist; i = k; } });
+    return i;
+  };
+  const onMove = (e: React.PointerEvent<SVGRectElement>) => {
+    if (e.pointerType === 'touch' && pinned === null) return; // taps pin, drags scroll the page
+    const i = nearest(e);
     setHover(i);
-    const rows = series.map(s => ({ s, v: s.values[i] })).filter(r => r.v !== null && r.v !== undefined).sort((a, b) => (invert ? a.v! - b.v! : b.v! - a.v!));
-    tip.show(e, (
-      <div className="space-y-1">
-        <div className="text-ink-3">{typeof labels[i] === 'number' ? `Week ${labels[i]}` : labels[i]}</div>
-        {rows.map(r => <TipRow key={r.s.id} color={hl.has(r.s.id) ? teamColor(r.s.id) : 'var(--ink-3)'} label={r.s.name} value={fmt(r.v, invert ? 0 : 1)} />)}
-      </div>
-    ));
+    tip.show(e, content(i));
+  };
+  const onDown = (e: React.PointerEvent<SVGRectElement>) => {
+    if (e.pointerType !== 'touch') return;
+    const i = nearest(e);
+    if (pinned !== null) {
+      if (pinned === i) { setPinned(null); setHover(null); tip.hide(); }
+      else { setPinned(i); setHover(i); tip.show(e, content(i)); }
+    } else { setPinned(i); setHover(i); tip.show(e, content(i)); }
   };
   // End labels only for highlighted series (selective direct labelling).
   const ends = series.filter(s => hl.has(s.id)).map(s => {
@@ -254,7 +302,8 @@ export function TrendChart({ series, labels, highlight, height = 220, yLabel, in
           <text key={e.s.id} x={x(e.i) + 9} y={y(e.v) + 4} fontSize={12} fontWeight={600} fill="var(--ink)">{e.s.name.length > 13 ? `${e.s.name.slice(0, 12)}…` : e.s.name}</text>
         ))}
         {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={pad.t} y2={height - pad.b} stroke="var(--ink-3)" strokeWidth={1} />}
-        <rect x={pad.l - 10} y={0} width={width - pad.l - pad.r + 20} height={height} fill="transparent" onPointerMove={onMove} onPointerLeave={() => { setHover(null); tip.hide(); }} />
+        <rect x={pad.l - 10} y={0} width={width - pad.l - pad.r + 20} height={height} fill="transparent" onPointerMove={onMove} onPointerDown={onDown}
+          onPointerLeave={() => { if (pinned !== null) return; setHover(null); tip.hide(); }} onPointerCancel={() => { setPinned(null); setHover(null); tip.hide(); }} />
       </svg>
       {tip.node}
     </div>
@@ -269,6 +318,7 @@ export function GroupedBars({ categories, series, height = 220, format = (v: num
   const [ref, width] = useWidth<HTMLDivElement>(600);
   const tip = useTooltip();
   const [hover, setHover] = useState<string | null>(null);
+  const [pinned, setPinned] = useState<string | null>(null);
   const pad = { l: 36, r: 8, t: 12, b: 26 };
   const maxY = Math.max(...series.flatMap(s => s.values), 0.001);
   const ticks = niceTicks(0, maxY, 4, true);
@@ -297,10 +347,21 @@ export function GroupedBars({ categories, series, height = 220, format = (v: num
               {series.map((s, si) => {
                 const key = `${c}:${s.key}`;
                 const x0 = gx + si * (barW + 2);
+                const content = <div className="space-y-1"><div className="text-ink-3">{c}</div><TipRow color={s.color} label={s.name} value={format(s.values[ci])} line={false} /></div>;
+                const down = (e: React.PointerEvent<SVGPathElement>) => {
+                  if (e.pointerType !== 'touch') return;
+                  if (pinned !== null) {
+                    if (pinned === key) { setPinned(null); setHover(null); tip.hide(); return; }
+                    setPinned(key); setHover(key); tip.show(e, content); return;
+                  }
+                  setPinned(key); setHover(key); tip.show(e, content);
+                };
                 return (
                   <path key={key} d={bar(x0, s.values[ci])} fill={s.color} opacity={hover && hover !== key ? 0.55 : 1}
-                    onPointerMove={e => { setHover(key); tip.show(e, <div className="space-y-1"><div className="text-ink-3">{c}</div><TipRow color={s.color} label={s.name} value={format(s.values[ci])} line={false} /></div>); }}
-                    onPointerLeave={() => { setHover(null); tip.hide(); }} />
+                    onPointerMove={e => { if (e.pointerType === 'touch' && pinned === null) return; setHover(key); tip.show(e, content); }}
+                    onPointerDown={down}
+                    onPointerLeave={() => { if (pinned === key) return; setHover(null); tip.hide(); }}
+                    onPointerCancel={() => { setPinned(null); setHover(null); tip.hide(); }} />
                 );
               })}
               <text x={pad.l + ci * band + band / 2} y={height - 6} textAnchor="middle" fontSize={11} fill="var(--ink-3)">{c}</text>
@@ -323,6 +384,7 @@ export function WeekColumns({ weeks, color, reference, height = 150, marks }: {
 }) {
   const [ref, width] = useWidth<HTMLDivElement>(400);
   const tip = useTooltip();
+  const [pinned, setPinned] = useState<number | null>(null);
   const pad = { l: 34, r: 6, t: 14, b: 24 };
   const maxY = Math.max(...weeks.map(w => w.value), reference ?? 0, 1);
   const ticks = niceTicks(0, maxY, 3, true);
@@ -331,6 +393,8 @@ export function WeekColumns({ weeks, color, reference, height = 150, marks }: {
   const barW = Math.min(24, band - 4);
   const y = (v: number) => pad.t + (1 - v / top) * (height - pad.t - pad.b);
   const base = y(0);
+  const show = (e: React.PointerEvent<Element>, w: { week: number; value: number; label?: string; result?: 'W' | 'L' | 'T' | null }) =>
+    tip.show(e, <div><div className="text-ink-3">Week {w.week}{w.result ? ` · ${w.result}` : ''}</div><div className="num font-semibold">{fmt(w.value)} pts</div>{w.label && <div className="text-ink-2">{w.label}</div>}</div>);
   return (
     <div ref={ref} className="w-full min-w-0">
       <svg className="block max-w-full" width={width} height={height} role="img" aria-label="Points by week">
@@ -343,8 +407,17 @@ export function WeekColumns({ weeks, color, reference, height = 150, marks }: {
         {weeks.map((w, i) => {
           const x0 = pad.l + i * band + (band - barW) / 2;
           const t = y(w.value), h = Math.max(0, base - t), r = Math.min(4, h, barW / 2);
+          const down = (e: React.PointerEvent<Element>) => {
+            if (e.pointerType !== 'touch') return;
+            if (pinned !== null) {
+              if (pinned === w.week) { setPinned(null); tip.hide(); return; }
+              setPinned(w.week); show(e, w); return;
+            }
+            setPinned(w.week); show(e, w);
+          };
           return (
-            <g key={w.week} onPointerMove={e => tip.show(e, <div><div className="text-ink-3">Week {w.week}{w.result ? ` · ${w.result}` : ''}</div><div className="num font-semibold">{fmt(w.value)} pts</div>{w.label && <div className="text-ink-2">{w.label}</div>}</div>)} onPointerLeave={tip.hide}>
+            <g key={w.week} onPointerMove={e => { if (e.pointerType === 'touch' && pinned === null) return; show(e, w); }} onPointerDown={down}
+              onPointerLeave={() => { if (pinned === w.week) return; tip.hide(); }} onPointerCancel={() => { setPinned(null); tip.hide(); }}>
               <rect x={pad.l + i * band} y={pad.t} width={band} height={height - pad.t - pad.b} fill="transparent" />
               <path d={`M${x0},${base}V${t + r}Q${x0},${t} ${x0 + r},${t}H${x0 + barW - r}Q${x0 + barW},${t} ${x0 + barW},${t + r}V${base}Z`} fill={color} opacity={w.result === 'L' ? 0.55 : 1} />
               {marks && w.result && <text x={x0 + barW / 2} y={t - 4} textAnchor="middle" fontSize={10} fontWeight={600} fill="var(--ink-2)">{w.result}</text>}
@@ -365,12 +438,20 @@ export function HBars({ rows, color = 'var(--accent)', format = (v: number) => f
   rows: { label: ReactNode; value: number; key: string; detail?: ReactNode }[]; color?: string; format?: (v: number) => string; negativeColor?: string;
 }) {
   const tip = useTooltip();
+  const [pinned, setPinned] = useState<string | null>(null);
   const max = Math.max(...rows.map(r => Math.abs(r.value)), 0.001);
   return (
     <div className="space-y-1.5">
       {rows.map(r => (
         <div key={r.key} className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_auto] items-center gap-2 text-[13px] sm:grid-cols-[minmax(90px,38%)_1fr_auto]"
-          onPointerMove={e => r.detail && tip.show(e, r.detail)} onPointerLeave={tip.hide}>
+          onPointerMove={e => { if (e.pointerType === 'touch' && pinned === null) return; if (r.detail) tip.show(e, r.detail); }}
+          onPointerDown={e => {
+            if (e.pointerType !== 'touch' || !r.detail) return;
+            if (pinned !== null) { if (pinned === r.key) { setPinned(null); tip.hide(); return; } setPinned(r.key); tip.show(e, r.detail); return; }
+            setPinned(r.key); tip.show(e, r.detail);
+          }}
+          onPointerLeave={() => { if (pinned === r.key) return; tip.hide(); }}
+          onPointerCancel={() => { setPinned(null); tip.hide(); }}>
           <div className="truncate text-ink-2">{r.label}</div>
           <div className="h-3">
             <div className="h-full rounded-r-[4px]" style={{ width: `${(Math.abs(r.value) / max) * 100}%`, minWidth: 2, background: r.value < 0 ? negativeColor : color }} />

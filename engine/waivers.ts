@@ -40,6 +40,10 @@ interface Args {
   freeAgents: readonly string[];
   otherRosters: readonly (readonly string[])[];
   faabRemaining: number | null;
+  /** The full season FAAB allowance, for converting bid points to a share of budget. */
+  faabBudget?: number;
+  /** This season's FAAB-winning adds so far: raw bid points by week (the observed clearing prices). */
+  recentBids?: readonly { week: number; amount: number }[];
   dynasty: ReadonlyMap<string, number>;
   trending: ReadonlyMap<string, number>;
   isLocked: (id: string) => boolean;
@@ -51,6 +55,47 @@ interface Args {
 const DISCOUNT = 0.92;
 /** Converts dynasty value (0–100) into "points you'd give up" when choosing a drop. */
 const DYNASTY_KEEP_WEIGHT = 0.9;
+
+/**
+ * The observed FAAB market: this season's winning bids from the last four waiver weeks.
+ * Without enough history (early season, or the first ever run) this returns null and the
+ * guidance falls back to a value share of the remaining budget.
+ */
+function faabMarket(a: Args): { low: number; mid: number; high: number; count: number; weeks: number } | null {
+  const bids = a.recentBids ?? [];
+  const weeks = [...new Set(bids.map(b => b.week))].sort((x, y) => y - x);
+  const amounts = bids.filter(b => b.week >= weeks[0] - 3).map(b => b.amount).sort((x, y) => x - y);
+  if (amounts.length < 3) return null;
+  const quantile = (f: number) => amounts[Math.round(f * (amounts.length - 1))];
+  return { low: quantile(0.25), mid: quantile(0.5), high: quantile(0.75), count: amounts.length, weeks: Math.min(weeks.length, 4) };
+}
+
+/**
+ * FAAB guidance anchored to clearing prices: the recent market sets the basis and demand
+ * (how many rivals would start him) scales it up. Falls back to a share of remaining budget
+ * that decays with the points he actually adds, when no clearing prices are observable yet.
+ */
+function bidRange(r: WaiverRecommendation, a: Args & { faabRemaining: number; faabBudget: number }): { low: number; high: number } {
+  const remaining = a.faabRemaining;
+  const demand = 1 + 0.2 * r.competition;
+  const market = faabMarket(a);
+  if (market) {
+    return {
+      low: Math.min(remaining, Math.max(0, Math.round(market.low * demand))),
+      high: Math.min(remaining, Math.max(market.mid + 1, Math.round(market.high * demand))),
+    };
+  }
+  const share = Math.min(0.5, Math.max(0.01, (r.netGain / 160) * (1 + 0.25 * r.competition)));
+  return { low: Math.max(0, Math.round(remaining * share * 0.7)), high: Math.max(1, Math.round(remaining * share * 1.25)) };
+}
+
+/** Suggested-bid explainer: what the market says, in percent of the season allowance. */
+function marketReason(a: Args & { faabRemaining: number; faabBudget: number }): string | null {
+  const market = faabMarket(a);
+  if (!market) return null;
+  const pct = (x: number) => `${Math.round((100 * x) / a.faabBudget)}%`;
+  return `Recent market: ${market.count} FAAB wins over the last ${market.weeks} waiver weeks, median bid ${pct(market.mid)} of budget (middle 50% ${pct(market.low)}–${pct(market.high)})`;
+}
 
 export function waiverRecommendations(a: Args): WaiverRecommendation[] {
   const weight = (w: number) => DISCOUNT ** Math.max(0, w - a.currentWeek);
@@ -181,13 +226,15 @@ export function waiverRecommendations(a: Args): WaiverRecommendation[] {
   for (const r of top) {
     const p = a.players[r.id];
     const perWeek = r.netGain / Math.max(1, r.startWeeks.length);
+    let marketNote: string | null = null;
     if (a.faabRemaining !== null && a.faabRemaining > 0) {
-      // Guidance, not a clearing-price prediction: scale by value and by how many rivals want him.
-      const share = Math.min(0.5, Math.max(0.01, (r.netGain / 160) * (1 + 0.25 * r.competition)));
-      r.faab = { low: Math.max(0, Math.round(a.faabRemaining * share * 0.7)), high: Math.max(1, Math.round(a.faabRemaining * share * 1.25)) };
+      const faab = { ...a, faabRemaining: a.faabRemaining, faabBudget: a.faabBudget ?? 100 };
+      r.faab = bidRange(r, faab);
+      marketNote = marketReason(faab);
     }
     if (r.weekGain > 0.3) r.reasons.push(`+${r.weekGain.toFixed(1)} pts to your best lineup this week`);
     if (r.startWeeks.length) r.reasons.push(`Starts for you in ${r.startWeeks.length} of the next ${a.weeks.length} weeks (${perWeek.toFixed(1)}/wk when he does)`);
+    if (marketNote) r.reasons.push(marketNote);
     const tr = a.trending.get(r.id);
     if (tr) r.reasons.push(`${tr.toLocaleString('en-US')} Sleeper adds in the last 48h`);
     if (r.competition) r.reasons.push(`${r.competition} other team${r.competition > 1 ? 's' : ''} would start him`);

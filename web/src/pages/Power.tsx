@@ -10,6 +10,7 @@ export default function PowerPage() {
   const q = usePower(leagueId);
   const [focus, setFocus] = useState<number | null>(null);
   const [chosen, setMetric] = useState<'value' | 'dynasty'>('value');
+  const [pinnedSeason, setPinnedSeason] = useState<number | null>(null);
   const tip = useTooltip();
   const metric = boot.league.isDynasty ? chosen : 'value';
   if (q.isPending) return <PageSkeleton />;
@@ -19,6 +20,14 @@ export default function PowerPage() {
   const maxValue = Math.max(...p.rankings.map(r => (metric === 'value' ? r.rosterValue : r.dynastyValue)), 1);
   const sp = p.season;
   const maxTotal = Math.max(...sp.rankings.map(r => r.total), 1);
+  const seasonTip = (r: (typeof sp.rankings)[number]) => (
+    <div className="num space-y-0.5">
+      <div className="font-semibold">{teamName(r.rosterId)}</div>
+      <div>{fmt(r.scored)} scored over {sp.playedWeeks} wk</div>
+      <div>{fmt(r.projected)} projected over {sp.remainingWeeks} wk</div>
+      <div className="text-ink-2">{fmt(r.ppg)} per week · {r.scoredRank === r.rank ? 'same rank as points so far' : `#${r.scoredRank} in points so far`}</div>
+    </div>
+  );
   const seasonSpan = [
     sp.playedWeeks ? `Wk${sp.playedWeeks > 1 ? 's' : ''} 1${sp.playedWeeks > 1 ? `–${sp.playedWeeks}` : ''} scored` : null,
     sp.firstRemaining !== null ? `wk${sp.remainingWeeks > 1 ? 's' : ''} ${sp.firstRemaining}${sp.remainingWeeks > 1 ? `–${sp.lastRegularWeek}` : ''} projected` : null,
@@ -34,12 +43,14 @@ export default function PowerPage() {
           <div className="divide-y divide-[var(--line)]">
             {p.rankings.map(r => (
               <div key={r.rosterId} className={cx('grid grid-cols-[32px_minmax(0,1fr)_auto] items-start gap-3 p-4 sm:px-5', r.rosterId === myTeamId && 'bg-accent-soft')}
-                onMouseEnter={() => setFocus(r.rosterId)} onMouseLeave={() => setFocus(null)}>
+                onPointerEnter={e => { if (e.pointerType !== 'touch') setFocus(r.rosterId); }}
+                onPointerLeave={e => { if (e.pointerType !== 'touch') setFocus(null); }}
+                onPointerDown={e => { if (e.pointerType === 'touch') setFocus(f => (f === r.rosterId ? null : r.rosterId)); }}>
                 <div className="num pt-1 text-[22px] font-semibold text-ink-3">{r.rank}</div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2.5"><TeamAvatar rosterId={r.rosterId} size={30} /><div className="min-w-0"><TeamLink rosterId={r.rosterId} className="font-semibold" /><div className="text-[12px] text-ink-3">{record(r.wins, r.losses, r.ties)} · {fmt(r.ppg)} ppg · outlook {fmt(r.outlookPpg)} / wk</div></div></div>
-                  <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-4">
-                    {([['season', 'Scoring'], ['allPlay', 'All-play'], ['recent', 'Recent'], ['outlook', 'Outlook']] as const).map(([k, label]) => (
+                  <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-5">
+                    {([['season', 'Scoring'], ['strength', 'SoS-adjusted'], ['allPlay', 'All-play'], ['recent', 'Recent'], ['outlook', 'Outlook']] as const).map(([k, label]) => (
                       <div key={k}>
                         <div className="flex justify-between text-[11px] text-ink-3"><span>{label}</span><span className="num">{fmt(r.components[k], 0)}</span></div>
                         <Meter value={r.components[k] / 100} color={teamColor(r.rosterId)} label={`${label} ${fmt(r.components[k], 0)}`} />
@@ -61,15 +72,16 @@ export default function PowerPage() {
             <div className="-mx-1.5 space-y-1">
               {sp.rankings.map(r => (
                 <div key={r.rosterId} className={cx('grid grid-cols-[18px_minmax(110px,38%)_1fr_52px] items-center gap-2 rounded-[6px] px-1.5 py-1 text-[13px]', r.rosterId === myTeamId && 'bg-accent-soft')}
-                  onMouseEnter={() => setFocus(r.rosterId)} onMouseLeave={() => { setFocus(null); tip.hide(); }}
-                  onMouseMove={e => tip.show(e, (
-                    <div className="num space-y-0.5">
-                      <div className="font-semibold">{teamName(r.rosterId)}</div>
-                      <div>{fmt(r.scored)} scored over {sp.playedWeeks} wk</div>
-                      <div>{fmt(r.projected)} projected over {sp.remainingWeeks} wk</div>
-                      <div className="text-ink-2">{fmt(r.ppg)} per week · {r.scoredRank === r.rank ? 'same rank as points so far' : `#${r.scoredRank} in points so far`}</div>
-                    </div>
-                  ))}>
+                  onPointerEnter={e => { if (e.pointerType !== 'touch') { setFocus(r.rosterId); tip.show(e, seasonTip(r)); } }}
+                  onPointerLeave={() => { if (pinnedSeason === r.rosterId) return; setFocus(null); tip.hide(); }}
+                  onPointerMove={e => { if (e.pointerType !== 'touch') tip.show(e, seasonTip(r)); }}
+                  onPointerDown={e => {
+                    if (e.pointerType !== 'touch') return;
+                    if (pinnedSeason !== null && pinnedSeason !== r.rosterId) { setPinnedSeason(r.rosterId); setFocus(r.rosterId); tip.show(e, seasonTip(r)); return; }
+                    if (pinnedSeason === r.rosterId) { setPinnedSeason(null); setFocus(null); tip.hide(); return; }
+                    setPinnedSeason(r.rosterId); setFocus(r.rosterId); tip.show(e, seasonTip(r));
+                  }}
+                  onPointerCancel={() => { setPinnedSeason(null); setFocus(null); tip.hide(); }}>
                   <div className="num text-center font-semibold text-ink-3">{r.rank}</div>
                   <TeamLink rosterId={r.rosterId} />
                   <div className="flex h-3" role="img" aria-label={`${fmt(r.scored)} scored, ${fmt(r.projected)} projected`}>

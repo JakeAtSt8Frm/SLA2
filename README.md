@@ -128,9 +128,14 @@ start/sit cohort, Neighbas in Paris scoring (UK-BG and The O.J. gave the same ve
 | + recency-weighted career average, this-season snap share and gap to provider | 6.174 | 6.251 |
 | + red-zone looks, air yards, target share | 6.180 | 6.250 |
 | Correct weeks 6+ by the model's weeks 1–5 miss, per position | 6.179 | 6.254 |
+| + teammate-usage features (QB throws/shares, healthy same-position peers, team usage share) | 6.182 | 6.265 |
 
 None beat the shipped model, so it stays: all seasons, refit on everything through the latest completed
-week. The weekly retrain workflow (below) keeps folding each new week in.
+week. The weekly retrain workflow (below) keeps folding each new week in. The one experiment that hurt
+was teammate-usage context (the team's QB throws and split level, how many healthy same-position peers
+took snaps beside the player, and his share of team targets+carries): it lost on the tuning season
+(2024 MAE 6.174 → 6.182, pairs 0.6044 → 0.6018) and 2025 confirmed it, so it was reverted — the model
+apparently reads a player's own snap share and targets already, and the crowd around him adds noise.
 
 ### ESPN leagues
 
@@ -232,6 +237,15 @@ move to GitHub in `data/snapshot-seed/`). A league that fails to build,
 for example after the ESPN login expires, keeps its last published data. A deploy takes under a minute
 (the first took 41 s), so on a private repository the schedule uses roughly 850 of Pro's 3,000 monthly
 Actions minutes in season, plus about 120 for the weekly retrain.
+
+**Claim token (ESPN claims from the site).** Claims start claim.yml with the owner's own fine-grained
+GitHub token, which each browser stores in localStorage and pastes once per device. Alternatively set the
+`CLAIM_TOKEN` repository secret (`gh secret set CLAIM_TOKEN`, locally `.env.local` with
+`VITE_GITHUB_TOKEN=…`) and the build bakes it in — then no device needs any setup. What that costs: the
+baked token ships in the site's JavaScript, public to anyone who can open the link. It only permits Actions
+read/write on this repository, but anyone could use it to start claim jobs, which make real ESPN moves, so
+keep it scoped to this repository and revoke it if rogue runs appear. A token pasted in the browser
+overrides the baked one until cleared ("Reset to built-in token").
 
 `.github/workflows/retrain.yml` retrains all three models every Wednesday (after Monday night's game),
 runs `npm run check` (including the TypeScript-vs-scikit-learn parity test), commits the model files and

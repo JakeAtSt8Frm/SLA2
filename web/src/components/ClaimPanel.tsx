@@ -3,7 +3,7 @@ import { Ban, CircleCheck, CircleX, ExternalLink, LoaderCircle } from 'lucide-re
 import { CLAIMS_AVAILABLE, STATIC, useCancelClaim, useClaimInfo, useStartClaim, type ClaimInfoView, type ClaimJobView } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { ago, kickoff } from '../lib/format.ts';
-import { checkToken, getToken, githubRepo, runsUrl, setToken, subscribeToken, tokenHelpUrl, tokenSettingsUrl } from '../lib/github.ts';
+import { bakedToken, checkToken, getToken, githubRepo, hasTokenOverride, runsUrl, setToken, subscribeToken, tokenHelpUrl, tokenSettingsUrl } from '../lib/github.ts';
 import { Button, Card, Empty, Notice, Skeleton, cx } from './ui.tsx';
 
 const PHASES: Record<NonNullable<ClaimJobView['phase']>, string> = {
@@ -80,7 +80,7 @@ function ClaimForm({ pid, initialDrop, player, token }: { pid: string; initialDr
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
             <label className="block">
               <span className="mb-1 block text-[12px] text-ink-3">{full ? `Drop (roster full: ${info.rosterLimit} of ${info.rosterLimit})` : `Drop (${info.openSpots} open spot${info.openSpots === 1 ? '' : 's'})`}</span>
-              <select value={chosen} onChange={e => { setDrop(e.target.value); setConfirming(false); }} className="h-9 w-full rounded-[9px] border border-line-strong bg-surface px-3 text-[14px] text-ink">
+              <select value={chosen} onChange={e => { setDrop(e.target.value); setConfirming(false); }} className="h-9 w-full rounded-[9px] border border-line-strong bg-surface px-3 text-[16px] text-ink">
                 {full ? <option value="" disabled>Choose who to drop</option> : <option value="none">No drop</option>}
                 {info.roster.map(r => <option key={r.espnId} value={String(r.espnId)}>{r.name} · {r.slot}{r.espnId === t.suggestedDrop ? ' (suggested)' : ''}</option>)}
               </select>
@@ -88,7 +88,7 @@ function ClaimForm({ pid, initialDrop, player, token }: { pid: string; initialDr
             {info.budget && onWaivers && !keep && (
               <label className="block">
                 <span className="mb-1 block text-[12px] text-ink-3">Bid (${info.budget.left} left)</span>
-                <input type="number" min={0} max={info.budget.left} value={bid} onChange={e => setBid(e.target.value)} className="num h-9 w-28 rounded-[9px] border border-line-strong bg-surface px-3 text-[14px]" />
+                <input type="number" min={0} max={info.budget.left} value={bid} onChange={e => setBid(e.target.value)} className="num h-9 w-28 rounded-[9px] border border-line-strong bg-surface px-3 text-[16px]" />
               </label>
             )}
           </div>
@@ -124,12 +124,17 @@ function ClaimForm({ pid, initialDrop, player, token }: { pid: string; initialDr
 
 function Footnote({ github }: { github: boolean }) {
   if (!github) return <p className="text-[11px] leading-relaxed text-ink-3">Made by the SLA server on this Mac with your ESPN login. Watches keep running while the server does and pick up again after a restart.</p>;
+  // Baked-token builds need no per-device setup: claims run with the token in the build unless a
+  // pasted override exists. Forgetting the override falls back to the built-in token.
+  const bakedHere = !!bakedToken && !hasTokenOverride();
   return (
     <p className="text-[11px] leading-relaxed text-ink-3">
       Runs as a GitHub Actions job in {githubRepo} with the ESPN login there, and re-checks the player live before moving. Jobs usually start within a minute; a watch keeps going in fresh runs until it’s done or you cancel it.{' '}
       <a href={runsUrl} target="_blank" rel="noreferrer" className="underline hover:text-ink">Runs on GitHub</a>{' · '}
       <a href={tokenSettingsUrl} target="_blank" rel="noreferrer" className="underline hover:text-ink">Your tokens</a>{' · '}
-      <button className="underline hover:text-ink" onClick={() => setToken(null)}>Forget token</button>
+      {bakedHere
+        ? <span>This build includes the owner’s claim token and nothing is saved here.</span>
+        : <button className="underline hover:text-ink" onClick={() => setToken(null)}>{bakedToken ? 'Reset to built-in token' : 'Forget token'}</button>}
       <TokenCheck />
     </p>
   );
@@ -163,7 +168,7 @@ function TokenSetup() {
       </ol>
       <div className="flex flex-wrap gap-2">
         <input type="password" autoComplete="off" spellCheck={false} value={value} onChange={e => setValue(e.target.value)} placeholder="github_pat_…" aria-label="GitHub token"
-          className="h-9 min-w-0 flex-1 rounded-[9px] border border-line-strong bg-surface px-3 font-mono text-[13px] placeholder:text-ink-3" />
+          className="h-9 min-w-0 flex-1 rounded-[9px] border border-line-strong bg-surface px-3 font-mono text-[16px] placeholder:text-ink-3" />
         <Button variant="primary" onClick={() => setToken(value)} disabled={!valid}>Save token</Button>
       </div>
       <p className="text-[11px] text-ink-3">Kept only in this browser. It can run and cancel Actions on {githubRepo} and nothing else.</p>

@@ -7,16 +7,27 @@ const REF = (import.meta.env.VITE_GITHUB_REF as string | undefined) ?? 'main';
 const WORKFLOW = 'claim.yml';
 const API = 'https://api.github.com';
 const TOKEN_KEY = 'sla-github-token';
+/**
+ * Token baked into the build (VITE_GITHUB_TOKEN): claims work with zero setup on every device.
+ * It is public to anyone who can open the site — scope it to this repository's Actions and
+ * rotate it, not the deployment, when needed. A token pasted in this browser overrides it.
+ */
+const BAKED = ((import.meta.env.VITE_GITHUB_TOKEN as string | undefined) ?? '').trim() || null;
 
 export const githubRepo = REPO;
 export const githubClaims = REPO.length > 0;
+/** Set at build time (deploy secret CLAIM_TOKEN); the pasted override lives in localStorage. */
+export const bakedToken = BAKED;
 export const tokenHelpUrl = 'https://github.com/settings/personal-access-tokens/new';
 export const runsUrl = `https://github.com/${REPO}/actions/workflows/${WORKFLOW}`;
 
 const tokenListeners = new Set<() => void>();
 export function getToken(): string | null {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+  try { return localStorage.getItem(TOKEN_KEY) ?? BAKED; } catch { return BAKED; }
 }
+export const hasTokenOverride = () => {
+  try { return localStorage.getItem(TOKEN_KEY) !== null; } catch { return false; }
+};
 export function setToken(token: string | null) {
   try { if (token) localStorage.setItem(TOKEN_KEY, token.trim()); else localStorage.removeItem(TOKEN_KEY); } catch { /* storage optional */ }
   tokenListeners.forEach(l => l());

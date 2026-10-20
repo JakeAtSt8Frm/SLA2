@@ -10,3 +10,4 @@ data/snapshots
 .DS_Store
 sla/
 data/claims*.json
+.env.local

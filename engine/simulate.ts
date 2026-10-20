@@ -4,15 +4,76 @@
  */
 import { hashSeed, mulberry32, normal, sample, type Outcome } from './distribution.ts';
 
+/**
+ * Shared game environment: starters in the same NFL team receive a common team shock, and both
+ * NFL teams in a game receive a common game shock, so a QB's ceiling moves with his WRs and D/ST.
+ */
+export interface CorrGroup {
+  /** The starter's own NFL team abbreviation (null when unknown: shockless). */
+  team: string | null;
+  /** NFL game id (nflverse), shared by both teams of that game. */
+  game: string | null;
+  /** How much of the shared shock this player carries (0–1, by position). */
+  load: number;
+}
+
+export interface Correlation { teamSd: number; gameSd: number }
+
+/**
+ * Shared-shock sizes in points. Sized so a full lineup's sd lands ≈ 15–20% above the sum of
+ * independent player variances, matching the observed spread of team totals around their
+ * best-lineup expectation on 2024–25 weeks.
+ */
+export const DEFAULT_CORRELATION: Correlation = { teamSd: 3.0, gameSd: 1.4 };
+
+/** How much of the shared environment a position carries: QB and D/ST live on game script the most. */
+export function corrLoad(pos: string): number {
+  if (pos === 'QB' || pos === 'DEF') return 1;
+  if (pos === 'K') return 0.5;
+  if (pos === 'DL' || pos === 'LB' || pos === 'DB') return 0.5;
+  return 0.8;
+}
+
+/** Per-starter correlation groups, aligned with the Outcome arrays. */
+export interface MatchupGroups { a: readonly (CorrGroup | null)[]; b: readonly (CorrGroup | null)[] }
+
 /** P(lineup A beats lineup B) by sampling every starter's outcome distribution. */
-export function simulateMatchup(a: readonly Outcome[], b: readonly Outcome[], seedKey: string, n = 10000) {
+export function simulateMatchup(a: readonly Outcome[], b: readonly Outcome[], seedKey: string, n = 10000, groups?: MatchupGroups, corr: Correlation = DEFAULT_CORRELATION) {
   const rand = mulberry32(hashSeed(seedKey));
   let winsA = 0;
   const totalsA = new Float64Array(n), totalsB = new Float64Array(n);
+  // Distinct NFL teams and games that receive shared shocks (team shocks shared across fantasy
+  // sides too: a BUF starter on either fantasy team moves with BUF's day).
+  const teams = new Set<string>(), games = new Set<string>();
+  if (groups) {
+    for (const g of [...groups.a, ...groups.b]) { if (g?.team) teams.add(g.team); if (g?.game) games.add(g.game); }
+  }
   for (let i = 0; i < n; i++) {
-    let sa = 0, sb = 0;
-    for (const o of a) sa += sample(o, rand);
-    for (const o of b) sb += sample(o, rand);
+    let teamShock: Map<string, number> | null = null, gameShock: Map<string, number> | null = null;
+    if (teams.size) {
+      teamShock = new Map();
+      for (const t of teams) teamShock.set(t, normal(rand) * corr.teamSd);
+    }
+    if (games.size) {
+      gameShock = new Map();
+      for (const g of games) gameShock.set(g, normal(rand) * corr.gameSd);
+    }
+    const draw = (list: readonly Outcome[], side: 'a' | 'b') => {
+      const gs = side === 'a' ? groups?.a : groups?.b;
+      let sum = 0;
+      list.forEach((o, j) => {
+        sum += sample(o, rand);
+        const g = gs ? gs[j] : null;
+        if (g) {
+          const t = g.team ? teamShock?.get(g.team) ?? 0 : 0;
+          const s = g.game ? gameShock?.get(g.game) ?? 0 : 0;
+          sum += g.load * (t + s);
+        }
+      });
+      return sum;
+    };
+    const sa = draw(a, 'a');
+    const sb = draw(b, 'b');
     totalsA[i] = sa;
     totalsB[i] = sb;
     if (sa > sb) winsA++;

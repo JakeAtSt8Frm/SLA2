@@ -7,12 +7,12 @@ import { sleeper, type SleeperMatchup } from './sleeper.ts';
 import { sourceFor } from './source.ts';
 import { configuredEspnLeagues } from './espn.ts';
 import { explainInputs, outcomeOf, type WeekForecast } from '../engine/forecast.ts';
-import { exceedProbability, normalCdf, variance } from '../engine/distribution.ts';
+import { exceedProbability, normalCdf, variance, type Outcome } from '../engine/distribution.ts';
 import { lineupStats } from '../engine/lineup.ts';
-import { powerRankings } from '../engine/power.ts';
+import { powerRankings, type PowerGame } from '../engine/power.ts';
 import { seasonAwards, summarizeSeason, type TeamWeek } from '../engine/recap.ts';
 import { compileScoring, didPlay, hasForecast, round, scoreBreakdown, scoreStats, categoryPoints, completeStats, STAT_LABELS } from '../engine/scoring.ts';
-import { simulateMatchup, simulateSeason, type TeamWeekDist } from '../engine/simulate.ts';
+import { corrLoad, simulateMatchup, simulateSeason, type CorrGroup, type TeamWeekDist } from '../engine/simulate.ts';
 import { evaluateTrade, lineupDist, TradeError, type TradeKit, type TradeRequest } from '../engine/trade.ts';
 import { waiverRecommendations } from '../engine/waivers.ts';
 import { buildDefenseIndex, type DefenseRow } from '../engine/defense.ts';
@@ -230,12 +230,38 @@ function seasonSim(core: LeagueCore) {
 function power(core: LeagueCore) {
   return once(core, 'power', () => {
     const upcoming = core.horizon.filter(w => w <= core.lastRegularWeek).slice(0, 6);
+    const completed = core.results.length;
     return powerRankings(core.teams.map(t => {
       const s = core.summaries.get(t.rosterId)!;
       const outlook = upcoming.length ? upcoming.reduce((a, w) => a + (core.bestByWeek.get(`${t.rosterId}:${w}`)?.expected ?? 0), 0) / upcoming.length : 0;
-      return { rosterId: t.rosterId, weekly: s.weekly, allPlayWins: s.allPlayWins, allPlayGames: s.allPlayWins + s.allPlayLosses, outlook };
-    }), core.results.length);
+      const games: PowerGame[] = [];
+      for (let w = 1; w <= completed; w++) {
+        const ms = core.schedule.get(w) ?? [];
+        const me = ms.find(m => m.rosterId === t.rosterId);
+        const opp = me && me.matchupId !== null ? ms.find(m2 => m2.matchupId === me.matchupId && m2.rosterId !== t.rosterId) : undefined;
+        games.push({ opponentId: opp?.rosterId ?? null, margin: opp && me ? r2(me.points - opp.points) : null });
+      }
+      return { rosterId: t.rosterId, weekly: s.weekly, allPlayWins: s.allPlayWins, allPlayGames: s.allPlayWins + s.allPlayLosses, outlook, games };
+    }), completed);
   });
+}
+
+/**
+ * Side entries for a matchup simulation: outcome distributions and their game-environment groups
+ * (shared shocks within an NFL team and across the same NFL game), aligned index by index.
+ */
+function simSide(core: LeagueCore, week: number, ids: readonly (string | null)[]): { outcomes: Outcome[]; groups: (CorrGroup | null)[] } {
+  const f = core.forecasts.get(week);
+  const outcomes: Outcome[] = [], groups: (CorrGroup | null)[] = [];
+  for (const pid of ids) {
+    if (!pid) continue;
+    const fc = f?.get(pid);
+    if (!fc) continue;
+    outcomes.push(outcomeOf(fc));
+    const p = core.players[pid];
+    groups.push(p?.team ? { team: p.team, game: core.gameFor(p.team, week)?.id ?? null, load: corrLoad(p.pos) } : null);
+  }
+  return { outcomes, groups };
 }
 
 function matchupPairs(ms: readonly SleeperMatchup[]): [SleeperMatchup, SleeperMatchup | null][] {
@@ -382,8 +408,9 @@ async function matchupsView(core: LeagueCore, week: number) {
     let winProb: number | null = null, sim10: ReturnType<typeof simulateMatchup> | null = null, optimizedWinProb: number | null = null;
     if (b && forecasts && !isPast) {
       if (isCurrent) {
-        const outcomes = (m: SleeperMatchup) => m.starters.filter(s => s !== '0').map(pid => forecasts.get(pid)).filter((f): f is WeekForecast => !!f).map(outcomeOf);
-        sim10 = simulateMatchup(outcomes(a), outcomes(b), `${id}:${week}:${a.rosterId}:${b.rosterId}`, 8000);
+        const starters = (m: SleeperMatchup) => m.starters.filter(s => s !== '0');
+        const sa = simSide(core, week, starters(a)), sb = simSide(core, week, starters(b));
+        sim10 = simulateMatchup(sa.outcomes, sb.outcomes, `${id}:${week}:${a.rosterId}:${b.rosterId}`, 8000, { a: sa.groups, b: sb.groups });
         winProb = sim10.winProbA;
       } else {
         const key1 = `${week}:${a.rosterId}:${b.rosterId}`, key2 = `${week}:${b.rosterId}:${a.rosterId}`;
@@ -458,20 +485,20 @@ export async function lineup(id: string, rosterId: number) {
 
 function lineupView(core: LeagueCore, week: number, t: LeagueCore['teams'][number], adv: NonNullable<ReturnType<LeagueCore['advice']['get']>>) {
   const id = core.id, rosterId = t.rosterId;
-  const f = core.forecasts.get(week)!;
   const bench = t.roster.players.filter(pid => !adv.optimal.ids.includes(pid) && !core.taxiOrIr.has(pid));
   const row = (pid: string | null) => (pid ? { ...playerRow(core, pid), locked: core.isLocked(pid) } : null);
   // Head-to-head odds against the opponent as set vs. as optimised.
   const ms = core.schedule.get(week) ?? [];
   const me = ms.find(m => m.rosterId === rosterId);
   const opp = me && me.matchupId !== null ? ms.find(m => m.matchupId === me.matchupId && m.rosterId !== rosterId) : undefined;
-  let odds: { asSet: number; optimized: number; opponent: number } | null = null;
+  let odds: { asSet: number; optimized: number; winMax: number | null; opponent: number } | null = null;
   if (opp) {
-    const outcomes = (ids: (string | null)[]) => ids.filter((x): x is string => !!x).map(pid => f.get(pid)).filter((x): x is WeekForecast => !!x).map(outcomeOf);
-    const oppIds = opp.starters.map(s => (s === '0' ? null : s));
+    const mine = simSide(core, week, adv.current.ids), best = simSide(core, week, adv.optimal.ids), theirs = simSide(core, week, opp.starters.map(s => (s === '0' ? null : s)));
+    const maxSide = adv.winMax ? simSide(core, week, adv.winMax.ids) : null;
     odds = {
-      asSet: pct(simulateMatchup(outcomes(adv.current.ids), outcomes(oppIds), `${id}:${week}:set:${rosterId}`, 6000).winProbA),
-      optimized: pct(simulateMatchup(outcomes(adv.optimal.ids), outcomes(oppIds), `${id}:${week}:opt:${rosterId}`, 6000).winProbA),
+      asSet: pct(simulateMatchup(mine.outcomes, theirs.outcomes, `${id}:${week}:set:${rosterId}`, 6000, { a: mine.groups, b: theirs.groups }).winProbA),
+      optimized: pct(simulateMatchup(best.outcomes, theirs.outcomes, `${id}:${week}:opt:${rosterId}`, 6000, { a: best.groups, b: theirs.groups }).winProbA),
+      winMax: adv.winMax && maxSide ? pct(simulateMatchup(maxSide.outcomes, theirs.outcomes, `${id}:${week}:max:${rosterId}`, 6000, { a: maxSide.groups, b: theirs.groups }).winProbA) : null,
       opponent: opp.rosterId,
     };
   }
@@ -480,8 +507,10 @@ function lineupView(core: LeagueCore, week: number, t: LeagueCore['teams'][numbe
     slots: core.slots,
     current: adv.current.ids.map(row),
     optimal: adv.optimal.ids.map(row),
+    winMax: adv.winMax ? adv.winMax.ids.map(row) : null,
     currentTotal: r1(adv.current.expected), optimalTotal: r1(adv.optimal.expected), gain: r1(adv.gain),
     currentSd: r1(adv.current.sd), optimalSd: r1(adv.optimal.sd),
+    winMaxTotal: adv.winMax ? r1(adv.winMax.expected) : null, winMaxSd: adv.winMax ? r1(adv.winMax.sd) : null,
     swaps: adv.swaps.map(s => ({ ...s, gain: r2(s.gain), confidence: pct(s.confidence) })),
     moves: adv.moves,
     lockedSlots: adv.lockedSlots,
@@ -563,6 +592,9 @@ export async function waivers(id: string, rosterId: number) {
       freeAgents,
       otherRosters: core.teams.filter(x => x.rosterId !== rosterId).map(x => x.roster.players.filter(pid => !core.taxiOrIr.has(pid))),
       faabRemaining: Math.max(0, core.league.waiverBudget - t.roster.faabUsed),
+      faabBudget: core.league.waiverBudget,
+      recentBids: core.transactions.filter(tx => (tx.type === 'waiver' || tx.type === 'free_agent') && tx.faab !== null)
+        .flatMap(tx => Object.keys(tx.adds).map(() => ({ week: tx.week, amount: tx.faab! }))),
       // Redraft rosters reset every year: a drop only costs what the player adds this season.
       dynasty: core.league.isDynasty ? new Map([...core.values].map(([pid, v]) => [pid, v.dynasty])) : new Map(),
       trending: core.trending,
@@ -669,8 +701,8 @@ function powerPage(core: LeagueCore) {
       const top = [...starters].sort((a, b) => (core.values.get(b)?.value ?? 0) - (core.values.get(a)?.value ?? 0)).slice(0, 3);
       return {
         ...teamView(core, p.rosterId), score: r1(p.score), rank: p.rank,
-        components: { season: r1(p.components.season), allPlay: r1(p.components.allPlay), recent: r1(p.components.recent), outlook: r1(p.components.outlook) },
-        weights: { season: r2(p.weights.season), allPlay: r2(p.weights.allPlay), recent: r2(p.weights.recent), outlook: r2(p.weights.outlook) },
+        components: { season: r1(p.components.season), strength: r1(p.components.strength), allPlay: r1(p.components.allPlay), recent: r1(p.components.recent), outlook: r1(p.components.outlook) },
+        weights: { season: r2(p.weights.season), strength: r2(p.weights.strength), allPlay: r2(p.weights.allPlay), recent: r2(p.weights.recent), outlook: r2(p.weights.outlook) },
         ppg: r1(s.weekly.length ? s.pointsFor / s.weekly.length : 0),
         outlookPpg: r1(upcoming.length ? upcoming.reduce((a, w) => a + (core.bestByWeek.get(`${p.rosterId}:${w}`)?.expected ?? 0), 0) / upcoming.length : 0),
         rosterValue: r1(t.roster.players.reduce((a, pid) => a + (core.values.get(pid)?.value ?? 0), 0)),
