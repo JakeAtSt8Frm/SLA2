@@ -2,14 +2,17 @@ import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type L
 import { createPortal } from 'react-dom';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeftRight, BarChart3, CalendarDays, ChartNoAxesCombined, FlaskConical, History, LayoutDashboard, ListChecks,
-  Menu, Moon, RefreshCw, ScrollText, Search, Shield, Sparkles, Sun, Swords, Trophy, UserPlus, Users, X,
+  ArrowLeftRight, BarChart3, CalendarDays, ChartNoAxesCombined, CircleX, ExternalLink, FlaskConical, History, LayoutDashboard, ListChecks,
+  LoaderCircle, Menu, Moon, RefreshCw, ScrollText, Search, Shield, Sparkles, Sun, Swords, Trophy, UserPlus, Users, X,
 } from 'lucide-react';
-import { prefetchCore, searchLeagues, STATIC, useBootstrap, useLeagues, type LeagueSearchResult } from './lib/api.ts';
+import { ApiError, prefetchCore, searchLeagues, sleeperLeague, STATIC, useBootstrap, useLeagues, type ConfiguredLeague, type LeagueSearchResult } from './lib/api.ts';
 import { AppProvider, useApp, useTheme } from './lib/context.tsx';
 import { ago } from './lib/format.ts';
-import { atLeagueRoute, DEFAULT_LEAGUE, isLeagueId, navigate, pathFor, useRoute, type Page } from './lib/router.ts';
+import { getToken, githubRepo } from './lib/github.ts';
+import { dismissLeagueLoad, isPublished, loadLeague, useLeagueLoad, type LeagueLoad } from './lib/league-load.ts';
+import { atLeagueRoute, isLeagueId, navigate, pathFor, rememberLeague, startLeague, useRoute, type Page } from './lib/router.ts';
 import { Button, cx, ErrorState, PageSkeleton, Select, TeamAvatar, useEscape } from './components/ui.tsx';
+import { TokenCheck, TokenSetup, useToken } from './components/GitHubToken.tsx';
 import { PlayerDrawer } from './components/PlayerDrawer.tsx';
 
 const pageModules: Record<Page, () => Promise<{ default: ComponentType }>> = {
@@ -63,16 +66,28 @@ const NAV: { group: string; items: { page: Page; label: string; icon: ComponentT
 export function App() {
   const route = useRoute();
   useEffect(() => {
-    if (!atLeagueRoute()) navigate(pathFor(DEFAULT_LEAGUE, 'hub'), { replace: true });
+    if (!atLeagueRoute()) navigate(pathFor(startLeague(), 'hub'), { replace: true });
   }, []);
   const boot = useBootstrap(route.leagueId);
+  const missing = boot.isError && !boot.data && boot.error instanceof ApiError && boot.error.status === 404;
+  useEffect(() => {
+    if (boot.data) rememberLeague(route.leagueId);
+    // The temporary league left the site (another one replaced it): open the default next time.
+    else if (missing && startLeague() === route.leagueId) rememberLeague(null);
+  }, [boot.data, missing, route.leagueId]);
   if (boot.isPending) return <BootScreen />;
   // Only when there's nothing to show: a failed background refresh keeps the app (and open drawers) as they are.
   if (boot.isError && !boot.data) {
+    // The static site has only the leagues it built; any other Sleeper league can be added from here.
+    const addable = STATIC && missing && /^\d+$/.test(route.leagueId);
     return (
       <div className="mx-auto max-w-lg p-6 pt-24">
-        <ErrorState error={boot.error} onRetry={() => void boot.refetch()} />
-        <div className="mt-4 flex justify-center">{STATIC ? <YourLeagues onDone={() => undefined} /> : <LeagueFinder onDone={() => undefined} />}</div>
+        <ErrorState error={addable ? new Error('This league isn’t on the site. Add it below; it takes a minute or two.') : boot.error} onRetry={() => void boot.refetch()} />
+        <div className="card mt-4 p-5">
+          <YourLeagues onDone={() => undefined} />
+          <div className="eyebrow mb-2 mt-5">Open another Sleeper league</div>
+          <LeagueLoader onDone={() => undefined} initial={addable ? route.leagueId : ''} />
+        </div>
       </div>
     );
   }
@@ -191,6 +206,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
   const client = useQueryClient();
   const fetching = useIsFetching();
   const [finder, setFinder] = useState(false);
+  const load = useLeagueLoad();
   return (
     <header className="safe-top sticky top-0 z-20 border-b border-line bg-[color-mix(in_oklab,var(--page)_88%,transparent)] backdrop-blur">
       <div className="mx-auto flex h-14 max-w-[1320px] items-center gap-2 px-4 sm:px-6 lg:px-8">
@@ -201,6 +217,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
             <span className="block truncate text-[14px] font-semibold leading-tight">{boot.league.name}</span>
             <span className="block truncate text-[11px] leading-tight text-ink-3">{boot.league.platform === 'espn' ? 'ESPN' : 'Sleeper'} · {boot.league.totalRosters}-team {boot.league.isDynasty ? 'dynasty' : 'redraft'}{boot.league.idpSlots ? ` · ${boot.league.idpSlots} IDP` : ''} · updated {ago(boot.generatedAt)}</span>
           </span>
+          {load && load.phase !== 'failed' && <LoaderCircle size={14} className="shrink-0 animate-spin text-ink-3" aria-label={`Adding ${load.name}`} />}
         </button>
         <div className="ml-auto flex items-center gap-1.5">
           <div className="hidden items-center gap-2 sm:flex">
@@ -249,6 +266,8 @@ function PickTeam() {
 
 function LeagueDialog({ onClose }: { onClose: () => void }) {
   const dialog = useEscape(onClose);
+  const { leagueId, boot } = useApp();
+  const current: ConfiguredLeague = { id: leagueId, name: boot.league.name, platform: boot.league.platform, season: boot.league.season, teams: boot.league.totalRosters, dynasty: boot.league.isDynasty };
   // Portal: the sticky, blurred header is its own stacking context and would trap the overlay beneath the page.
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--overlay)] p-4 pt-[12vh]" onClick={onClose}>
@@ -258,77 +277,151 @@ function LeagueDialog({ onClose }: { onClose: () => void }) {
           <h2 className="text-[16px] font-semibold">Switch league</h2>
           <button onClick={onClose} className="rounded-md p-1 text-ink-3 hover:bg-surface-2" aria-label="Close"><X size={18} /></button>
         </div>
-        <YourLeagues onDone={onClose} />
-        {!STATIC && (
-          <>
-            <div className="eyebrow mb-2 mt-5">Open another Sleeper league</div>
-            <LeagueFinder onDone={onClose} />
-          </>
-        )}
+        <YourLeagues onDone={onClose} current={current} />
+        <div className="eyebrow mb-2 mt-5">Open another Sleeper league</div>
+        <LeagueLoader onDone={onClose} />
       </div>
     </div>,
     document.body,
   );
 }
 
-/** The leagues this deployment is set up for (Sleeper and ESPN), one click away. */
-function YourLeagues({ onDone }: { onDone: () => void }) {
+/**
+ * The leagues this deployment is set up for (Sleeper and ESPN), one click away. A league opened by
+ * ID or username (`current`, when it isn't one of them) is listed as temporary while it's open.
+ */
+function YourLeagues({ onDone, current }: { onDone: () => void; current?: ConfiguredLeague }) {
   const leagues = useLeagues();
   // Also shown on the error screen, where no league is open.
   const leagueId = useRoute().leagueId;
-  if (!leagues.data?.length) return null;
+  const list: (ConfiguredLeague & { temporary?: boolean })[] = [...(leagues.data ?? [])];
+  const temporary = !!current && leagues.isSuccess && !list.some(l => l.id === current.id);
+  if (temporary) list.push({ ...current, temporary: true });
+  if (!list.length) return null;
   return (
     <div className="space-y-1">
       <div className="eyebrow mb-2">Your leagues</div>
-      {leagues.data.map(l => (
+      {list.map(l => (
         <button key={l.id} onClick={() => { onDone(); if (l.id !== leagueId) navigate(pathFor(l.id, 'hub')); }} aria-current={l.id === leagueId ? 'true' : undefined}
           className={cx('flex w-full items-center gap-3 rounded-[9px] p-2 text-left hover:bg-surface-2', l.id === leagueId && 'bg-surface-2')}>
           <span className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold', l.platform === 'espn' ? 'bg-[color-mix(in_oklab,#d00_18%,var(--surface-2))] text-ink' : 'bg-surface-3 text-ink-2')}>{l.platform === 'espn' ? 'ESPN' : 'SLPR'}</span>
           <span className="min-w-0 flex-1">
             <span className="block truncate font-medium">{l.name}</span>
-            <span className="block text-[12px] text-ink-3">{[l.season, l.teams ? `${l.teams} teams` : null, l.dynasty ? 'dynasty' : 'redraft'].filter(Boolean).join(' · ')}</span>
+            <span className="block text-[12px] text-ink-3">{[l.season, l.teams ? `${l.teams} teams` : null, l.dynasty ? 'dynasty' : 'redraft', l.temporary ? 'temporary' : null].filter(Boolean).join(' · ')}</span>
           </span>
           {l.id === leagueId && <span className="text-[12px] text-ink-3">Current</span>}
         </button>
       ))}
+      {temporary && <p className="px-2 pt-1 text-[12px] text-ink-3">{current.name} stays open, here and when you reopen the app, until you switch to another league.</p>}
     </div>
   );
 }
 
-function LeagueFinder({ onDone }: { onDone: () => void }) {
-  const [input, setInput] = useState('');
+/**
+ * Opens any Sleeper league by ID, league link or owner username, as a temporary league. The local
+ * server builds it on the spot; the static site first adds it with a GitHub Actions build (lib/league-load.ts).
+ */
+function LeagueLoader({ onDone, initial = '' }: { onDone: () => void; initial?: string }) {
+  const [input, setInput] = useState(initial);
   const [result, setResult] = useState<LeagueSearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [awaitingToken, setAwaitingToken] = useState<{ id: string; name: string } | null>(null);
+  const token = useToken();
+  const load = useLeagueLoad();
+  // The token was all that was missing: start the build.
+  useEffect(() => {
+    if (!awaitingToken || !token) return;
+    setAwaitingToken(null);
+    void loadLeague(awaitingToken.id, awaitingToken.name);
+  }, [awaitingToken, token]);
   const go = (id: string) => { onDone(); navigate(pathFor(id, 'hub')); };
-  const submit = async () => {
-    const v = input.trim();
-    setError(null);
-    if (isLeagueId(v)) return go(v);
-    if (!v) return;
-    setBusy(true);
-    try { setResult(await searchLeagues(v)); } catch (e) { setError(e instanceof Error ? e.message : 'Lookup failed'); } finally { setBusy(false); }
+  const open = async (id: string) => {
+    if (!STATIC || await isPublished(id)) return go(id);
+    if (!/^\d+$/.test(id)) throw new Error('Only Sleeper leagues can be added from here.');
+    const league = await sleeperLeague(id);
+    if (!githubRepo) throw new Error('This copy of the site can’t add leagues: it isn’t linked to a GitHub repository.');
+    if (getToken()) void loadLeague(id, league.name); else setAwaitingToken({ id, name: league.name });
   };
+  const run = async (task: () => Promise<void>) => {
+    setError(null);
+    setBusy(true);
+    try { await task(); } catch (e) { setError(e instanceof Error ? e.message : 'Lookup failed'); } finally { setBusy(false); }
+  };
+  const submit = () => {
+    const v = input.trim();
+    // A league link (sleeper.com/leagues/<id>/…) works as well as the bare ID.
+    const id = /\/leagues?\/(\d{10,22})/.exec(v)?.[1] ?? v;
+    if (isLeagueId(id)) return run(() => open(id));
+    if (v) return run(async () => setResult(await searchLeagues(v)));
+  };
+  if (load) return <LoadProgress load={load} />;
+  if (awaitingToken) {
+    return (
+      <div>
+        <TokenSetup intro={`${awaitingToken.name} isn’t on this site yet. To add it, the site starts a build on GitHub.`} />
+        <button onClick={() => setAwaitingToken(null)} className="mt-2 text-[12px] text-ink-3 underline hover:text-ink">Cancel</button>
+      </div>
+    );
+  }
   return (
     <div className="w-full">
       <form onSubmit={e => { e.preventDefault(); void submit(); }} className="flex gap-2">
-        <input value={input} onChange={e => setInput(e.target.value)} placeholder="Sleeper username or league ID" aria-label="Sleeper username or league ID"
+        <input value={input} onChange={e => setInput(e.target.value)} placeholder="Sleeper league ID or username" aria-label="Sleeper league ID or username"
           className="h-9 min-w-0 flex-1 rounded-[9px] border border-line-strong bg-surface px-3 text-[16px] placeholder:text-ink-3" />
-        <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Finding…' : 'Go'}</Button>
+        <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Finding…' : 'Open'}</Button>
       </form>
       {error && <p className="mt-2 text-[13px] text-bad-ink">{error}</p>}
       {result && (
         <div className="mt-3 max-h-72 space-y-1 overflow-y-auto scroll-thin">
           {result.leagues.length === 0 && <p className="text-[13px] text-ink-3">No NFL leagues found for {result.user.name}.</p>}
           {result.leagues.map(l => (
-            <button key={l.id} onClick={() => go(l.id)} className="flex w-full items-center gap-3 rounded-[9px] p-2 text-left hover:bg-surface-2">
+            <button key={l.id} onClick={() => void run(() => open(l.id))} disabled={busy} className="flex w-full items-center gap-3 rounded-[9px] p-2 text-left hover:bg-surface-2">
               {l.avatar ? <img src={l.avatar} alt="" className="h-8 w-8 rounded-full" /> : <span className="h-8 w-8 rounded-full bg-surface-3" />}
               <span className="min-w-0 flex-1"><span className="block truncate font-medium">{l.name}</span><span className="block text-[12px] text-ink-3">{l.season} · {l.teams} teams · {l.status.replace('_', ' ')}</span></span>
             </button>
           ))}
         </div>
       )}
-      <p className="mt-3 text-[12px] text-ink-3">Any Sleeper NFL league works. Custom scoring, IDP and superflex are read from the league’s settings.</p>
+      <p className="mt-3 text-[12px] text-ink-3">
+        Any Sleeper NFL league works. Custom scoring, IDP and superflex are read from the league’s settings.
+        {' '}It opens as a temporary league and stays until you switch to another.{STATIC ? ' One that isn’t on this site yet takes a minute or two to add.' : ''}
+      </p>
+    </div>
+  );
+}
+
+const LOAD_STEPS: Record<LeagueLoad['phase'], string> = {
+  starting: 'Starting a build on GitHub…',
+  waiting: 'Waiting for the site’s current update to finish…',
+  building: 'Forecasting every player under the league’s scoring…',
+  publishing: 'Publishing to the site…',
+  failed: '',
+};
+
+/** A temporary league being added to the static site. */
+function LoadProgress({ load }: { load: LeagueLoad }) {
+  const failed = load.phase === 'failed';
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (failed) return;
+    const t = setInterval(() => tick(n => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [failed]);
+  const secs = Math.max(0, Math.floor((Date.now() - load.startedAt) / 1000));
+  return (
+    <div className="rounded-[10px] border border-line p-3">
+      <div className="flex items-center gap-2 text-[14px] font-medium">
+        {failed ? <CircleX size={16} className="shrink-0 text-bad-ink" aria-hidden /> : <LoaderCircle size={16} className="shrink-0 animate-spin text-ink-3" aria-hidden />}
+        <span className="min-w-0 truncate">{failed ? `Couldn’t add ${load.name}` : `Adding ${load.name}`}</span>
+      </div>
+      <p className={cx('mt-1 text-[13px]', failed ? 'text-bad-ink' : 'text-ink-2')}>{failed ? load.error : LOAD_STEPS[load.phase]}</p>
+      {!failed && <p className="mt-1 text-[12px] text-ink-3">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')} · usually a minute or two. It opens by itself when it’s ready, so you can close this.</p>}
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-[12px] text-ink-3">
+        {load.runUrl && <a href={load.runUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline hover:text-ink">Build on GitHub<ExternalLink size={11} aria-hidden /></a>}
+        <button className="underline hover:text-ink" onClick={dismissLeagueLoad}>{failed ? 'Try another league' : 'Stop waiting'}</button>
+      </div>
+      {failed && load.tokenProblem && <TokenCheck auto />}
     </div>
   );
 }

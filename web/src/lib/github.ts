@@ -1,6 +1,7 @@
 /**
- * ESPN claims from the static site: the page starts .github/workflows/claim.yml with the owner's own
- * GitHub token (kept in this browser only), and reads each claim's runs and result annotation back.
+ * GitHub Actions jobs started from the static site with the owner's own GitHub token (kept in this
+ * browser only): ESPN claims (.github/workflows/claim.yml), whose runs and result annotations are
+ * read back, and builds that add a temporary league to the site (.github/workflows/deploy.yml).
  */
 const REPO = (import.meta.env.VITE_GITHUB_REPO as string | undefined) ?? '';
 const REF = (import.meta.env.VITE_GITHUB_REF as string | undefined) ?? 'main';
@@ -59,7 +60,7 @@ async function gh<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (res.status === 403 || res.status === 404) {
       throw new GitHubError(init.method === 'POST'
         ? `GitHub refused to ${path.endsWith('/cancel') ? 'cancel' : 'start'} the job (${res.status}).${said} Use Check token below to see what the token is missing.`
-        : `GitHub refused to list the claim jobs (${res.status}).${said}`);
+        : `GitHub refused to list the jobs (${res.status}).${said}`);
     }
     throw new GitHubError(`GitHub error ${res.status}.${said}`);
   }
@@ -80,16 +81,16 @@ export async function checkToken(): Promise<{ ok: boolean; message: string }> {
   // Only classic tokens report scopes; fine-grained tokens send no such header.
   const scopes = me.headers.get('X-OAuth-Scopes');
   if (login && login.toLowerCase() !== owner.toLowerCase()) {
-    return { ok: false, message: `This token belongs to ${login}, but the claim jobs run in ${REPO}. Create the token while signed in as ${owner}.` };
+    return { ok: false, message: `This token belongs to ${login}, but the jobs run in ${REPO}. Create the token while signed in as ${owner}.` };
   }
   const runs = await call(`/repos/${REPO}/actions/workflows/${WORKFLOW}/runs?per_page=1&status=completed`);
   if (!runs.ok) {
     return { ok: false, message: `This token can’t see ${REPO}’s Actions (${runs.status}). Edit it: Repository access → Only select repositories → ${REPO.split('/')[1]}.` };
   }
   const finished = ((await runs.json()) as { workflow_runs: { id: number }[] }).workflow_runs[0];
-  if (!finished) return { ok: true, message: 'The token can see the repository. Its Actions permission can be confirmed after the first claim runs.' };
+  if (!finished) return { ok: true, message: 'The token can see the repository. Its Actions permission can be confirmed after the first job runs.' };
   const probe = await call(`/repos/${REPO}/actions/runs/${finished.id}/cancel`, { method: 'POST' });
-  if (probe.status === 409 || probe.ok) return { ok: true, message: `The token works: it can start and cancel claim jobs in ${REPO}.` };
+  if (probe.status === 409 || probe.ok) return { ok: true, message: `The token works: it can start and cancel jobs in ${REPO}.` };
   if (scopes !== null) {
     return { ok: false, message: `This is a classic token with scopes “${scopes || 'none'}”. It needs the “repo” scope, or use a fine-grained token with Actions: Read and write on ${REPO.split('/')[1]}.` };
   }
@@ -209,3 +210,32 @@ export async function cancelClaim(id: string): Promise<void> {
   }
   started.delete(id);
 }
+
+// ─── Temporary leagues ───────────────────────────────────────────────────────
+
+const DEPLOY = 'deploy.yml';
+export const buildsUrl = `https://github.com/${REPO}/actions/workflows/${DEPLOY}`;
+
+export interface LeagueBuild { id: number; url: string }
+export interface BuildRun { status: string; conclusion: string | null }
+
+/**
+ * Starts a site build with `league` as the temporary league. GitHub answers with the run it started
+ * (return_run_details); null if it didn't say, and findLeagueBuild looks for it instead.
+ */
+export async function startLeagueBuild(league: string): Promise<LeagueBuild | null> {
+  const run = await gh<{ workflow_run_id?: number; html_url?: string } | null>(`/repos/${REPO}/actions/workflows/${DEPLOY}/dispatches`, {
+    method: 'POST',
+    body: JSON.stringify({ ref: REF, inputs: { guest_league: league }, return_run_details: true }),
+  });
+  return run?.workflow_run_id ? { id: run.workflow_run_id, url: run.html_url ?? buildsUrl } : null;
+}
+
+/** The newest manually started build created since `since` (ms). */
+export async function findLeagueBuild(since: number): Promise<LeagueBuild | null> {
+  const { workflow_runs: runs } = await gh<{ workflow_runs: Run[] }>(`/repos/${REPO}/actions/workflows/${DEPLOY}/runs?per_page=5&event=workflow_dispatch`);
+  const run = runs.find(r => Date.parse(r.created_at) >= since - 10_000);
+  return run ? { id: run.id, url: run.html_url } : null;
+}
+
+export const buildRun = (id: number) => gh<BuildRun>(`/repos/${REPO}/actions/runs/${id}`);

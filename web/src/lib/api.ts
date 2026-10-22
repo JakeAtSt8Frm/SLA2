@@ -78,7 +78,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     throw new ApiError(0, STATIC ? 'Can’t reach the app’s data. Check your connection.' : 'Can’t reach the SLA server. Is it running?');
   }
   const body = await response.json().catch(() => null) as { error?: string; generatedAt?: string; league?: { id?: string } } | null;
-  if (!response.ok) throw new ApiError(response.status, body?.error ?? (STATIC && response.status === 404 ? 'Not available yet. It appears after the next data refresh.' : `Request failed (${response.status})`));
+  // A static host's SPA fallback answers a missing file with the app page: that's a 404 too.
+  const status = STATIC && response.ok && body === null ? 404 : response.status;
+  if (status >= 400) throw new ApiError(status, body?.error ?? (STATIC && status === 404 ? 'Not available yet. It appears after the next data refresh.' : `Request failed (${status})`));
   if (STATIC && body?.generatedAt && body.league?.id) builds.set(body.league.id, body.generatedAt);
   return body as T;
 }
@@ -214,7 +216,46 @@ export const useCancelClaim = (id: string) => {
     onSettled: () => client.invalidateQueries({ queryKey: ['claims', id] }),
   });
 };
-export const searchLeagues = (username: string) => request<LeagueSearchResult>(`/api/users/${encodeURIComponent(username)}/leagues`);
+
+// ─── Sleeper lookups from the browser ────────────────────────────────────────
+// The static site has no server: it asks Sleeper directly (Sleeper allows cross-origin requests).
+
+const SLEEPER = 'https://api.sleeper.app/v1';
+type Row = Record<string, unknown> | null;
+async function sleeperJson<T>(path: string): Promise<T> {
+  let response: Response;
+  try { response = await fetch(`${SLEEPER}${path}`); } catch { throw new ApiError(0, 'Can’t reach Sleeper. Check your connection.'); }
+  if (!response.ok) throw new ApiError(response.status, `Sleeper error ${response.status}. Try again in a moment.`);
+  return await response.json() as T;
+}
+type SleeperLeagueInfo = LeagueSearchResult['leagues'][number];
+const leagueInfo = (row: NonNullable<Row>): SleeperLeagueInfo => ({
+  id: String(row.league_id ?? ''), name: String(row.name ?? 'League'), season: Number(row.season), teams: Number(row.total_rosters),
+  avatar: row.avatar ? `https://sleepercdn.com/avatars/thumbs/${String(row.avatar)}` : null, status: String(row.status ?? ''),
+});
+
+/** A Sleeper league's name and size, to check an ID before building it. */
+export async function sleeperLeague(id: string): Promise<SleeperLeagueInfo> {
+  const row = await sleeperJson<Row>(`/league/${encodeURIComponent(id)}`);
+  if (!row) throw new ApiError(404, 'League not found. Check the league ID.');
+  if (row.sport !== 'nfl') throw new ApiError(400, 'Only NFL leagues are supported.');
+  return leagueInfo(row);
+}
+
+/** A Sleeper user's NFL leagues this season and last (the server's findLeagues, on the static site). */
+export async function searchLeagues(username: string): Promise<LeagueSearchResult> {
+  if (!STATIC) return request<LeagueSearchResult>(`/api/users/${encodeURIComponent(username)}/leagues`);
+  if (!/^[A-Za-z0-9_.-]{2,40}$/.test(username)) throw new ApiError(400, 'Enter a Sleeper username or league ID.');
+  const user = await sleeperJson<Row>(`/user/${encodeURIComponent(username)}`);
+  if (!user?.user_id) throw new ApiError(404, 'Sleeper user not found. Check the username.');
+  const state = await sleeperJson<{ season?: string; league_season?: string }>('/state/nfl');
+  const season = Number(state.league_season || state.season);
+  const lists = await Promise.all([season, season - 1].map(s => sleeperJson<Row[] | null>(`/user/${String(user.user_id)}/leagues/nfl/${s}`).catch(() => null)));
+  return {
+    user: { id: String(user.user_id), name: String(user.display_name ?? username), avatar: user.avatar ? `https://sleepercdn.com/avatars/thumbs/${String(user.avatar)}` : null },
+    leagues: lists.flatMap(list => (list ?? []).filter(row => row !== null).map(leagueInfo)).filter(l => l.id),
+  };
+}
 
 export interface Metrics { n: number; mae: number; rmse: number; bias: number; spearman: number; pairAcc: number; pairs: number; closePairAcc: number; closePairs: number; byPos: Record<string, { mae: number; n: number; bias: number; pairAcc: number }> }
 export interface ModelReport {

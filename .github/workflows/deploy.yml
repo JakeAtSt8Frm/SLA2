@@ -1,12 +1,22 @@
 # Builds the app and every league's data (scripts/build-static.ts) and publishes it to GitHub Pages.
 # Pages serve from a CDN, so nothing has to wake up; live scores in between builds come from
 # Sleeper directly in the browser.
+#
+# The site can also load a Sleeper league that isn't set up here: it starts this workflow with
+# guest_league (web/src/lib/github.ts). That temporary league is rebuilt with the others until the
+# site asks for a different one.
 name: Deploy
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      guest_league:
+        description: 'Temporary Sleeper league to build too, until another replaces it (none = drop it; blank keeps the current one)'
+        required: false
+        type: string
+        default: ''
   schedule:
     # Times are UTC. Sunday games: every 10 minutes.
     - cron: '*/10 13-23 * * 0'
@@ -70,6 +80,7 @@ jobs:
         env:
           SLA_BASE: ${{ steps.pages.outputs.base_path }}/
           SLA_SITE_URL: ${{ steps.pages.outputs.base_url }}
+          SLA_GUEST_LEAGUE: ${{ inputs.guest_league }}
           # ESPN claims from the site run as .github/workflows/claim.yml in this repository.
           VITE_GITHUB_REPO: ${{ github.repository }}
           # Claims need no per-device token setup when the CLAIM_TOKEN secret is set (a fine-grained

@@ -18,8 +18,27 @@ const appPath = () => {
   const p = window.location.pathname;
   return BASE && p.startsWith(BASE) ? p.slice(BASE.length) || '/' : p;
 };
-/** True when the address is a league page (anything else redirects to the default league). */
+/** True when the address is a league page (anything else redirects to the start league). */
 export const atLeagueRoute = () => appPath().startsWith('/league/');
+
+const LAST_LEAGUE = 'sla-league';
+/**
+ * The league the app opens to: the one open last time, so a temporary league (one opened by ID
+ * or username) stays until you switch to another; the configured default before that.
+ */
+export function startLeague(): string {
+  try {
+    const id = localStorage.getItem(LAST_LEAGUE);
+    if (id && isLeagueId(id)) return id;
+  } catch { /* storage optional */ }
+  return DEFAULT_LEAGUE;
+}
+/** Called once a league loads (and with null when the remembered one is gone). */
+export function rememberLeague(id: string | null) {
+  try {
+    if (id) localStorage.setItem(LAST_LEAGUE, id); else localStorage.removeItem(LAST_LEAGUE);
+  } catch { /* storage optional */ }
+}
 
 function parse(): Route {
   const parts = appPath().split('/').filter(Boolean);
@@ -28,7 +47,7 @@ function parse(): Route {
     const page = (PAGES.has(parts[2] as Page) ? parts[2] : 'hub') as Page;
     return { leagueId: parts[1], page, param: parts[3] ?? null, search };
   }
-  return { leagueId: DEFAULT_LEAGUE, page: 'hub', param: null, search };
+  return { leagueId: startLeague(), page: 'hub', param: null, search };
 }
 
 let current = parse();

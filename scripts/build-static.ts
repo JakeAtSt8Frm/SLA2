@@ -6,6 +6,10 @@
  * Also saves each league's pregame forecasts (data/snapshots, published under data/snapshots/ so
  * the next run starts from them). A league that fails to build keeps its last published files.
  *
+ * One more Sleeper league can ride along: the "temporary" league someone opened from the site
+ * (SLA_GUEST_LEAGUE, from the Deploy workflow's guest_league input). Later builds keep it, read from
+ * the published manifest, until another one replaces it (or `none` drops it).
+ *
  * Usage: node scripts/build-static.ts [outDir]   (env: SLA_SITE_URL = the live site, for carry-over)
  */
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
@@ -20,7 +24,27 @@ import * as views from '../server/views.ts';
 const OUT = path.resolve(process.argv[2] ?? path.join(import.meta.dirname, '..', 'dist', 'data'));
 const SITE = (process.env.SLA_SITE_URL ?? '').replace(/\/+$/, '');
 const DEFAULT_LEAGUE = process.env.SLA_DEFAULT_LEAGUE ?? '1312656463549726720';
-const LEAGUES = [...new Set([DEFAULT_LEAGUE, ...(process.env.SLA_LEAGUES ?? '').split(',').map(x => x.trim()).filter(Boolean), ...configuredEspnLeagues().map(l => l.id)])];
+const CONFIGURED = [...new Set([DEFAULT_LEAGUE, ...(process.env.SLA_LEAGUES ?? '').split(',').map(x => x.trim()).filter(Boolean), ...configuredEspnLeagues().map(l => l.id)])];
+
+/** The temporary league: the one just requested, else the one the live site already carries. */
+async function guestLeague(): Promise<string | null> {
+  const requested = (process.env.SLA_GUEST_LEAGUE ?? '').trim();
+  let id: string | null = requested && requested !== 'none' ? requested : null;
+  if (!requested && SITE) {
+    try {
+      // Cache-busted: Pages' CDN may still hold the manifest from before the last deploy.
+      const live = await (await fetch(`${SITE}/data/manifest.json?t=${Date.now()}`, { signal: AbortSignal.timeout(20_000) })).json() as { guest?: string | null };
+      id = live.guest ?? null;
+    } catch { /* first deploy, or the site is unreachable: no guest */ }
+  }
+  if (id && !/^\d{10,22}$/.test(id)) {
+    console.warn(`ignoring temporary league "${id}": not a Sleeper league ID`);
+    return null;
+  }
+  return id && !CONFIGURED.includes(id) ? id : null;
+}
+const GUEST = await guestLeague();
+const LEAGUES = GUEST ? [...CONFIGURED, GUEST] : CONFIGURED;
 
 let bytes = 0;
 async function write(file: string, data: unknown) {
@@ -136,19 +160,27 @@ async function publishSnapshots() {
 const t0 = Date.now();
 const built: string[] = [];
 let failed = 0;
+/** Why the temporary league couldn't be built, for the page that asked for it. */
+let guestError: { league: string; message: string } | null = null;
 for (const id of LEAGUES) {
   try {
     await buildLeague(id);
     built.push(id);
   } catch (error) {
     console.error(`build failed for ${id}:`, (error as Error).message);
-    if (await carryOver(id)) built.push(id); else failed++;
+    if (await carryOver(id)) built.push(id);
+    else if (id === GUEST) {
+      const message = (error as Error).message;
+      guestError = { league: id, message: /\b404\b/.test(message) ? 'Sleeper has no league with this ID.' : message };
+    } else failed++;
   }
 }
+// The switcher lists only the configured leagues; the temporary one is listed by the page that has it open.
 await write(path.join(OUT, 'leagues.json'), (await views.configuredLeagues(DEFAULT_LEAGUE)).filter(l => built.includes(l.id)));
 await write(path.join(OUT, 'model.json'), views.model());
 const snapshots = await publishSnapshots();
-await write(path.join(OUT, 'manifest.json'), { builtAt: new Date().toISOString(), leagues: built });
+await write(path.join(OUT, 'manifest.json'), { builtAt: new Date().toISOString(), leagues: built, guest: GUEST && built.includes(GUEST) ? GUEST : null, guestError });
 console.log(`static data: ${built.length} leagues, ${snapshots} snapshot files, ${(bytes / 1e6).toFixed(1)} MB in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 // Nothing at all to publish is a failed build; a league carried over from the last deploy is not.
-process.exit(built.length === 0 || failed === LEAGUES.length ? 1 : 0);
+// A temporary league that can't be built (a mistyped ID) doesn't hold back the others.
+process.exit(built.length === 0 || failed === CONFIGURED.length ? 1 : 0);

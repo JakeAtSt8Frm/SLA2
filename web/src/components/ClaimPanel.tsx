@@ -1,18 +1,16 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Ban, CircleCheck, CircleX, ExternalLink, LoaderCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Ban, CircleCheck, CircleX, LoaderCircle } from 'lucide-react';
 import { CLAIMS_AVAILABLE, STATIC, useCancelClaim, useClaimInfo, useStartClaim, type ClaimInfoView, type ClaimJobView } from '../lib/api.ts';
 import { useApp } from '../lib/context.tsx';
 import { ago, kickoff } from '../lib/format.ts';
-import { bakedToken, checkToken, getToken, githubRepo, hasTokenOverride, runsUrl, setToken, subscribeToken, tokenHelpUrl, tokenSettingsUrl } from '../lib/github.ts';
+import { bakedToken, githubRepo, hasTokenOverride, runsUrl, setToken, tokenSettingsUrl } from '../lib/github.ts';
+import { TokenCheck, TokenSetup, useToken } from './GitHubToken.tsx';
 import { Button, Card, Empty, Notice, Skeleton, cx } from './ui.tsx';
 
 const PHASES: Record<NonNullable<ClaimJobView['phase']>, string> = {
   checking: 'Checking ESPN', watching: 'Watching for a drop', waiting: 'Waiting for waivers to clear', sending: 'Sending to ESPN',
   queued: 'Waiting for GitHub to start the job', running: 'Running on GitHub',
 };
-
-/** The GitHub token the static site starts claims with, kept in this browser. */
-const useToken = () => useSyncExternalStore(subscribeToken, getToken, () => null);
 
 /** Add, claim or watch this player on an ESPN league: by the local server, or by a GitHub Actions job from the static site. */
 export function ClaimPanel({ pid, initialDrop, owner, name }: { pid: string; initialDrop: string | null; owner: number | null; name: string }) {
@@ -22,7 +20,7 @@ export function ClaimPanel({ pid, initialDrop, owner, name }: { pid: string; ini
   if (!CLAIMS_AVAILABLE) {
     return <p className="text-[12px] leading-relaxed text-ink-3">To add or claim this player from here, open SLA from the server on your Mac (npm run dev). It holds your ESPN login; this site doesn’t.</p>;
   }
-  if (STATIC && !token) return <Card><div className="eyebrow mb-3">Get this player</div><TokenSetup /></Card>;
+  if (STATIC && !token) return <Card><div className="eyebrow mb-3">Get this player</div><TokenSetup intro="To add or claim ESPN players from this site, it starts a job on GitHub that makes the move with the ESPN login there." /></Card>;
   return <ClaimForm key={pid} pid={pid} initialDrop={initialDrop} player={{ owner, name }} token={token} />;
 }
 
@@ -140,42 +138,6 @@ function Footnote({ github }: { github: boolean }) {
   );
 }
 
-/** Says what the saved token is missing, without starting anything. */
-function TokenCheck({ auto = false }: { auto?: boolean }) {
-  const [state, setState] = useState<{ ok: boolean; message: string } | 'checking' | null>(null);
-  const run = () => { setState('checking'); checkToken().then(setState, (error: Error) => setState({ ok: false, message: error.message })); };
-  useEffect(() => { if (auto) run(); }, [auto]);
-  return (
-    <span className="mt-2 block">
-      <Button size="sm" onClick={run} disabled={state === 'checking'}>{state === 'checking' ? 'Checking…' : 'Check token'}</Button>
-      {state && state !== 'checking' && <span className={cx('mt-1.5 block text-[12px] leading-relaxed', state.ok ? 'text-good-ink' : 'text-bad-ink')}>{state.message}</span>}
-    </span>
-  );
-}
-
-/** One-time setup on the static site: a fine-grained token that can run this repository's Actions. */
-function TokenSetup() {
-  const [value, setValue] = useState('');
-  const valid = /^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$/.test(value.trim());
-  return (
-    <div className="space-y-3 text-[13px] text-ink-2">
-      <p>To add or claim ESPN players from this site, it starts a job on GitHub that makes the move with the ESPN login there. That needs a GitHub token, once per device:</p>
-      <ol className="list-decimal space-y-1 pl-5 text-[12px]">
-        <li>Open <a href={tokenHelpUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline hover:text-ink">a new fine-grained token on GitHub<ExternalLink size={11} aria-hidden /></a>.</li>
-        <li>Resource owner: <b>{githubRepo.split('/')[0]}</b>. Repository access: <b>Only select repositories</b> → <b>{githubRepo.split('/')[1] ?? githubRepo}</b> (not “Public repositories”, which is read-only).</li>
-        <li>Permissions → Repository permissions → <b>Actions</b> → change it to <b>Read and write</b>.</li>
-        <li>Generate it, copy it, and paste it here.</li>
-      </ol>
-      <div className="flex flex-wrap gap-2">
-        <input type="password" autoComplete="off" spellCheck={false} value={value} onChange={e => setValue(e.target.value)} placeholder="github_pat_…" aria-label="GitHub token"
-          className="h-9 min-w-0 flex-1 rounded-[9px] border border-line-strong bg-surface px-3 font-mono text-[16px] placeholder:text-ink-3" />
-        <Button variant="primary" onClick={() => setToken(value)} disabled={!valid}>Save token</Button>
-      </div>
-      <p className="text-[11px] text-ink-3">Kept only in this browser. It can run and cancel Actions on {githubRepo} and nothing else.</p>
-    </div>
-  );
-}
-
 function JobRow({ job }: { job: ClaimJobView }) {
   const { leagueId } = useApp();
   const cancel = useCancelClaim(leagueId);
@@ -212,7 +174,7 @@ export function AutoClaims() {
         <h2 className="text-[16px] font-semibold tracking-tight">Auto-claims</h2>
         <span className="text-[12px] text-ink-3">Open any player, or use Claim on a pickup below</span>
       </div>
-      {STATIC && !token ? <div className="mt-3"><TokenSetup /></div> : <>
+      {STATIC && !token ? <div className="mt-3"><TokenSetup intro="To add or claim ESPN players from this site, it starts a job on GitHub that makes the move with the ESPN login there." /></div> : <>
         {info?.dryRun && <div className="mt-3"><Notice>Test mode (SLA_CLAIMS_DRY_RUN): moves are logged, not sent to ESPN.</Notice></div>}
         {info?.jobsError && <div className="mt-3"><Notice tone="warn">{info.jobsError}</Notice></div>}
         {q.isError && <div className="mt-3"><Notice tone="warn">{(q.error as Error).message}</Notice></div>}
