@@ -4,6 +4,7 @@ import { useApp } from '../lib/context.tsx';
 import { fmt, kickoff, prob, slotLabel } from '../lib/format.ts';
 import { RangeBar } from '../charts/charts.tsx';
 import { Card, CardHeader, Empty, ErrorState, InfoTip, Injury, Meter, Notice, PageHeader, PageSkeleton, PlayerLink, Pos, Ranks, Stat, cx } from '../components/ui.tsx';
+import { LineupDrift } from '../components/SiteRefresh.tsx';
 
 type Row = (PlayerRow & { locked: boolean }) | null;
 
@@ -22,6 +23,7 @@ export default function LineupPage() {
         eyebrow={`Week ${l.week} · ${teamName(myTeamId)}`}
         title="Start / sit"
       />
+      {myTeamId !== null && <LineupDrift week={l.week} published={new Map([[myTeamId, l.current.map(r => r?.id ?? null)]])} />}
       <Card>
         <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
           <Stat label="Your lineup as set" value={fmt(l.currentTotal)} sub={`± ${fmt(l.currentSd, 0)} pts (1 sd)`} />

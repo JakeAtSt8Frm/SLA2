@@ -72,3 +72,28 @@ export function useLiveGames<G extends Game>(games: readonly G[], week: number |
   const out = useMemo(() => (live ? games.map(g => applyLive(g, live, scoring, Date.now())) : [...games]), [games, live, scoring]);
   return { games: out, at: live?.at ?? null };
 }
+
+/**
+ * Each roster's starters as Sleeper has them right now, to spot lineups set after the data was
+ * built (static site, Sleeper leagues, the current week only).
+ */
+export function useSleeperStarters(week: number | null) {
+  const { boot, leagueId } = useApp();
+  return useQuery({
+    queryKey: ['sleeper-starters', leagueId, week],
+    queryFn: async () => {
+      const rows = await fetch(`${SLEEPER}/v1/league/${leagueId}/matchups/${week}`).then(r => (r.ok ? r.json() : [])) as unknown;
+      const starters = new Map<number, string[]>();
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const r = row as { roster_id?: unknown; starters?: unknown };
+        if (typeof r.roster_id === 'number' && Array.isArray(r.starters)) starters.set(r.roster_id, r.starters.filter((s): s is string => typeof s === 'string' && s !== '0'));
+      }
+      return starters;
+    },
+    enabled: STATIC && boot.league.platform === 'sleeper' && week !== null && week === boot.league.week,
+    staleTime: 60_000,
+    refetchInterval: 2 * 60_000,
+    refetchIntervalInBackground: false,
+    retry: 1,
+  });
+}

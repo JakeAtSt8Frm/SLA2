@@ -13,6 +13,7 @@ import { dismissLeagueLoad, isPublished, loadLeague, useLeagueLoad, type LeagueL
 import { atLeagueRoute, isLeagueId, navigate, pathFor, rememberLeague, startLeague, useRoute, type Page } from './lib/router.ts';
 import { Button, cx, ErrorState, PageSkeleton, Select, TeamAvatar, useEscape } from './components/ui.tsx';
 import { TokenCheck, TokenSetup, useToken } from './components/GitHubToken.tsx';
+import { RefreshStatus, RefreshTokenDialog, useRefreshData } from './components/SiteRefresh.tsx';
 import { PlayerDrawer } from './components/PlayerDrawer.tsx';
 
 const pageModules: Record<Page, () => Promise<{ default: ComponentType }>> = {
@@ -203,8 +204,8 @@ function Sidebar({ onClose }: { onClose: () => void }) {
 function TopBar({ onMenu }: { onMenu: () => void }) {
   const { boot, myTeamId, setMyTeam } = useApp();
   const [theme, toggle] = useTheme();
-  const client = useQueryClient();
   const fetching = useIsFetching();
+  const { refresh, busy } = useRefreshData();
   const [finder, setFinder] = useState(false);
   const load = useLeagueLoad();
   return (
@@ -230,8 +231,8 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
               className="w-[210px]"
             />
           </div>
-          <Button variant="ghost" size="sm" onClick={() => void client.invalidateQueries()} title="Refresh data">
-            <RefreshCw size={15} className={fetching ? 'animate-spin' : ''} aria-hidden /><span className="sr-only">Refresh</span>
+          <Button variant="ghost" size="sm" onClick={refresh} title={STATIC ? 'Get the latest from Sleeper' : 'Refresh data'}>
+            <RefreshCw size={15} className={fetching || busy ? 'animate-spin' : ''} aria-hidden /><span className="sr-only">Refresh</span>
           </Button>
           <Button variant="ghost" size="sm" onClick={toggle} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
             {theme === 'dark' ? <Sun size={15} aria-hidden /> : <Moon size={15} aria-hidden />}<span className="sr-only">Toggle theme</span>
@@ -241,6 +242,8 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
       <div className="border-t border-line px-4 py-2 sm:hidden">
         <Select label="Your team" value={myTeamId ?? 0} onChange={v => setMyTeam(v === 0 ? null : v)} options={[{ value: 0, label: 'Choose your team…' }, ...boot.teams.map(t => ({ value: t.rosterId, label: t.name }))]} className="w-full" />
       </div>
+      <RefreshStatus />
+      <RefreshTokenDialog />
       {finder && <LeagueDialog onClose={() => setFinder(false)} />}
     </header>
   );

@@ -4,7 +4,7 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { getCore } from './league.ts';
+import { getCore, refreshCore } from './league.ts';
 import { configuredEspnLeagues, validEspnId } from './espn.ts';
 import { findLeagues } from './sleeper.ts';
 import { sendJson } from './http.ts';
@@ -98,6 +98,8 @@ app.get('/api/leagues/:id/defense', async c => {
 });
 app.get('/api/leagues/:id/transactions', async c => json(c, await views.transactions(leagueId(c))));
 app.get('/api/leagues/:id/tracking', async c => json(c, await trackRecord(await getCore(leagueId(c)))));
+// The app's Refresh button: re-check Sleeper/ESPN now instead of when the freshness window runs out.
+app.post('/api/leagues/:id/refresh', async c => c.json({ generatedAt: (await refreshCore(leagueId(c))).generatedAt }));
 app.get('/api/users/:username/leagues', async c => {
   const username = c.req.param('username');
   if (!/^[A-Za-z0-9_.-]{2,40}$/.test(username)) throw new HttpError(400, 'Enter a Sleeper username.');

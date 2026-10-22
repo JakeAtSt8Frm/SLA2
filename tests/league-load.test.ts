@@ -2,14 +2,17 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 type Load = typeof import('../web/src/lib/league-load.ts');
 type GitHub = typeof import('../web/src/lib/github.ts');
+type Site = typeof import('../web/src/lib/site-build.ts');
 let load: Load;
 let gh: GitHub;
+let siteBuild: Site;
 const calls: { url: string; init?: RequestInit }[] = [];
 let respond: (url: string, init?: RequestInit) => { status: number; body?: unknown } = () => ({ status: 404 });
 const location = { pathname: '/league/1312656463549726720/hub', search: '' };
 
 beforeAll(async () => {
   vi.stubEnv('VITE_GITHUB_REPO', 'owner/repo');
+  vi.stubEnv('VITE_STATIC', '1');
   const store = new Map<string, string>();
   vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) });
   const go = (_: unknown, __: string, to: string) => { const u = new URL(to, 'http://site'); location.pathname = u.pathname; location.search = u.search; };
@@ -21,9 +24,10 @@ beforeAll(async () => {
   });
   gh = await import('../web/src/lib/github.ts');
   load = await import('../web/src/lib/league-load.ts');
+  siteBuild = await import('../web/src/lib/site-build.ts');
   gh.setToken('github_pat_test');
 });
-afterEach(() => { calls.length = 0; vi.useRealTimers(); load.dismissLeagueLoad(); });
+afterEach(() => { calls.length = 0; vi.useRealTimers(); load.dismissLeagueLoad(); siteBuild.dismissSiteRefresh(); });
 
 const GUEST = '1257479498937454592';
 
@@ -41,7 +45,7 @@ function site(scripts: { status: string; conclusion?: string }[][], published: (
       const id = Number(run[1]), n = polls.get(id) ?? 0;
       polls.set(id, n + 1);
       const steps = scripts[id - 901];
-      return { status: 200, body: steps[Math.min(n, steps.length - 1)] };
+      return { status: 200, body: { created_at: '2026-10-22T18:00:00Z', ...steps[Math.min(n, steps.length - 1)] } };
     }
     if (url.startsWith(`/data/${GUEST}/bootstrap.json`)) return published() ? { status: 200, body: { league: { id: GUEST } } } : { status: 404 };
     if (url.startsWith('/data/manifest.json')) return { status: 200, body: manifest() };
@@ -52,7 +56,7 @@ function site(scripts: { status: string; conclusion?: string }[][], published: (
 describe('temporary leagues on the static site', () => {
   it('starts the Deploy workflow with the league as guest_league and asks for the run it started', async () => {
     site([[{ status: 'queued' }]], () => false);
-    expect(await gh.startLeagueBuild(GUEST)).toEqual({ id: 901, url: 'https://github.com/owner/repo/actions/runs/901' });
+    expect(await gh.startSiteBuild(GUEST)).toEqual({ id: 901, url: 'https://github.com/owner/repo/actions/runs/901' });
     expect(calls[0].url).toBe('https://api.github.com/repos/owner/repo/actions/workflows/deploy.yml/dispatches');
     expect(JSON.parse(String(calls[0].init?.body))).toEqual({ ref: 'main', inputs: { guest_league: GUEST }, return_run_details: true });
   });
@@ -99,3 +103,40 @@ describe('temporary leagues on the static site', () => {
 });
 
 const stateOf = () => load.leagueLoad();
+
+describe('Refresh on the static site', () => {
+  it('asks for a GitHub token first on a device without one, then carries on', async () => {
+    gh.setToken(null);
+    const published = vi.fn();
+    await siteBuild.refreshSite(published);
+    expect(siteBuild.siteRefresh()).toMatchObject({ phase: 'token' });
+    expect(calls).toHaveLength(0);
+    vi.useFakeTimers();
+    site([[{ status: 'completed', conclusion: 'success' }]], () => false, () => ({ builtAt: '2026-10-22T18:01:00Z' }));
+    gh.setToken('github_pat_test');
+    siteBuild.resumeRefresh();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(published).toHaveBeenCalledOnce();
+    expect(siteBuild.siteRefresh()).toBeNull();
+    // Blank keeps the temporary league the site already has.
+    expect(JSON.parse(String(calls.find(c => c.url.endsWith('/dispatches'))?.init?.body))).toMatchObject({ inputs: { guest_league: '' } });
+  });
+
+  it('waits until Pages serves a build newer than the run it started', async () => {
+    vi.useFakeTimers();
+    let builtAt = '2026-10-22T17:50:00Z';
+    site([[{ status: 'in_progress' }, { status: 'completed', conclusion: 'success' }]], () => false, () => ({ builtAt }));
+    const published = vi.fn();
+    const task = siteBuild.refreshSite(published);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(siteBuild.siteRefresh()).toMatchObject({ phase: 'publishing' });
+    expect(published).not.toHaveBeenCalled();
+    // A second tap while it runs starts nothing new.
+    await siteBuild.refreshSite(published);
+    expect(calls.filter(c => c.url.endsWith('/dispatches'))).toHaveLength(1);
+    builtAt = '2026-10-22T18:00:40Z';
+    await vi.advanceTimersByTimeAsync(5000);
+    await task;
+    expect(published).toHaveBeenCalledOnce();
+  });
+});

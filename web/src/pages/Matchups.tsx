@@ -6,6 +6,7 @@ import { useSearchParam } from '../lib/router.ts';
 import { ScoreDistribution, WinBar } from '../charts/charts.tsx';
 import { Card, Empty, ErrorState, Injury, PageHeader, PageSkeleton, PlayerLink, Select, TeamAvatar, TeamLink, cx } from '../components/ui.tsx';
 import { ForecastSource } from '../components/ForecastSource.tsx';
+import { LineupDrift } from '../components/SiteRefresh.tsx';
 
 export default function MatchupsPage() {
   const { leagueId } = useApp();
@@ -28,6 +29,7 @@ function MatchupsView({ m, fetching, onWeek }: { m: Matchups; fetching: boolean;
         title={`Week ${m.week} matchups`}
         right={<Select label="Week" value={m.week} onChange={v => onWeek(v === boot.league.week ? null : String(v), true)} options={m.weeks.map(w => ({ value: w, label: `Week ${w}${w === boot.league.week ? ' (current)' : ''}` }))} className="w-44" />}
       />
+      {m.current && <LineupDrift week={m.week} published={new Map(m.games.flatMap(g => [g.a, g.b].flatMap(t => (t ? [[t.rosterId, t.lineup.map(p => p.id)] as const] : []))))} />}
       {(m.final || m.current) && <p className="text-[12px] leading-relaxed text-ink-3">Saved forecasts were recorded before kickoff. Replays use the current model trained on completed seasons and weeks; they are not out-of-sample evidence. A dash means no pregame forecast is available.</p>}
       {games.length === 0 && <Card><Empty title="No matchups scheduled this week" /></Card>}
       {games.map(g => <GameCard key={g.matchupId ?? g.a.rosterId} g={g} />)}

@@ -75,3 +75,15 @@ export function applyLive<G extends Game>(g: G, live: LiveWeek, scoring: [string
   const winProbA = spread > 1e-6 ? normalCdf((A.mean - B.mean) / spread) : A.mean > B.mean ? 1 : A.mean < B.mean ? 0 : 0.5;
   return { ...g, a: A.side, b: B.side, winProbA: round(winProbA, 4), range: liveRange(A, B), optimizedWinProbA: null, liveEstimate: true };
 }
+
+/** Rosters whose starters in Sleeper now differ from the ones a page was built with (order aside). */
+export function changedLineups(published: ReadonlyMap<number, readonly (string | null)[]>, live: ReadonlyMap<number, readonly string[]>): number[] {
+  const out: number[] = [];
+  for (const [rosterId, ids] of published) {
+    const now = live.get(rosterId);
+    if (!now) continue;
+    const before = new Set(ids.filter((id): id is string => !!id && id !== '0'));
+    if (before.size !== now.length || now.some(id => !before.has(id))) out.push(rosterId);
+  }
+  return out;
+}

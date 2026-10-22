@@ -211,28 +211,29 @@ export async function cancelClaim(id: string): Promise<void> {
   started.delete(id);
 }
 
-// ─── Temporary leagues ───────────────────────────────────────────────────────
+// ─── Site builds ─────────────────────────────────────────────────────────────
 
 const DEPLOY = 'deploy.yml';
 export const buildsUrl = `https://github.com/${REPO}/actions/workflows/${DEPLOY}`;
 
-export interface LeagueBuild { id: number; url: string }
-export interface BuildRun { status: string; conclusion: string | null }
+export interface SiteBuild { id: number; url: string }
+export interface BuildRun { status: string; conclusion: string | null; created_at: string }
 
 /**
- * Starts a site build with `league` as the temporary league. GitHub answers with the run it started
- * (return_run_details); null if it didn't say, and findLeagueBuild looks for it instead.
+ * Starts a site build now: every league rebuilt from Sleeper/ESPN, plus `guestLeague` as the
+ * temporary league (blank keeps the current one). GitHub answers with the run it started
+ * (return_run_details); null if it didn't say, and findSiteBuild looks for it instead.
  */
-export async function startLeagueBuild(league: string): Promise<LeagueBuild | null> {
+export async function startSiteBuild(guestLeague = ''): Promise<SiteBuild | null> {
   const run = await gh<{ workflow_run_id?: number; html_url?: string } | null>(`/repos/${REPO}/actions/workflows/${DEPLOY}/dispatches`, {
     method: 'POST',
-    body: JSON.stringify({ ref: REF, inputs: { guest_league: league }, return_run_details: true }),
+    body: JSON.stringify({ ref: REF, inputs: { guest_league: guestLeague }, return_run_details: true }),
   });
   return run?.workflow_run_id ? { id: run.workflow_run_id, url: run.html_url ?? buildsUrl } : null;
 }
 
 /** The newest manually started build created since `since` (ms). */
-export async function findLeagueBuild(since: number): Promise<LeagueBuild | null> {
+export async function findSiteBuild(since: number): Promise<SiteBuild | null> {
   const { workflow_runs: runs } = await gh<{ workflow_runs: Run[] }>(`/repos/${REPO}/actions/workflows/${DEPLOY}/runs?per_page=5&event=workflow_dispatch`);
   const run = runs.find(r => Date.parse(r.created_at) >= since - 10_000);
   return run ? { id: run.id, url: run.html_url } : null;

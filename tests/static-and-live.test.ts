@@ -170,3 +170,13 @@ describe('pregame replay of a past week', () => {
     expect([result.floor, result.median, result.ceiling]).toEqual([-12, -12, -12]);
   });
 });
+
+describe('lineups set in Sleeper after a build', () => {
+  it('names the rosters whose starters changed, ignoring order and empty slots', async () => {
+    const { changedLineups } = await import('../web/src/lib/live-score.ts');
+    const published = new Map<number, (string | null)[]>([[1, ['a', 'b', null]], [2, ['c', 'd']], [3, ['e']]]);
+    const live = new Map<number, string[]>([[1, ['b', 'a']], [2, ['c', 'x']], [4, ['z']]]);
+    expect(changedLineups(published, live)).toEqual([2]);
+    expect(changedLineups(published, new Map([[1, ['a', 'b', 'f']]]))).toEqual([1]);
+  });
+});
