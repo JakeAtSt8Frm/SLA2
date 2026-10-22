@@ -107,3 +107,15 @@ describe('ESPN calendar', () => {
     expect(nflWeekOf(Date.UTC(2025, 8, 4, 23), 2025)).toBe(1);
   });
 });
+
+describe('ESPN team logos', () => {
+  it('serves uploaded logos (which need the ESPN login) from the app, and stock logos as they are', async () => {
+    const { teamLogo, LOGO_FILE } = await import('../server/espn.ts');
+    const uploaded = teamLogo('https://mystique-api.fantasy.espn.com/apis/v1/domains/lm/images/54504790-A59A-11f1-8623-4f919cfbc4d9');
+    expect(uploaded).toBe('/api/espn-logos/54504790-a59a-11f1-8623-4f919cfbc4d9.jpg');
+    expect(LOGO_FILE.test(uploaded!.split('/').at(-1)!)).toBe(true);
+    const stock = 'https://g.espncdn.com/lm-static/logo-packs/ffl/HelmetAlphabet-ESPN/Helmet-M.svg';
+    expect(teamLogo(stock)).toBe(stock);
+    expect(teamLogo(null)).toBeNull();
+  });
+});

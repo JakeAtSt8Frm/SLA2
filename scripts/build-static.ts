@@ -16,7 +16,7 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { refreshesSettled } from '../server/cache.ts';
 import { claimSnapshot } from '../server/claims.ts';
-import { configuredEspnLeagues, isEspnId } from '../server/espn.ts';
+import { configuredEspnLeagues, espnLogo, isEspnId } from '../server/espn.ts';
 import { getCore, refreshCore, type LeagueCore } from '../server/league.ts';
 import { recordSnapshot, SNAPSHOT_DIR, trackRecord } from '../server/snapshots.ts';
 import * as views from '../server/views.ts';
@@ -47,9 +47,13 @@ const GUEST = await guestLeague();
 const LEAGUES = GUEST ? [...CONFIGURED, GUEST] : CONFIGURED;
 
 let bytes = 0;
+/** Logos uploaded to ESPN that published files point at (server/espn.ts teamLogo); copied by publishLogos. */
+const logoFiles = new Set<string>();
+const noteLogos = (text: string) => { for (const m of text.matchAll(/\/api\/espn-logos\/([0-9a-f-]{36}\.jpg)/g)) logoFiles.add(m[1]); };
 async function write(file: string, data: unknown) {
   const text = JSON.stringify(data);
   bytes += text.length;
+  noteLogos(text);
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, text);
 }
@@ -128,8 +132,10 @@ async function carryOver(id: string): Promise<boolean> {
       await Promise.all(list.slice(i, i + 24).map(async name => {
         const res = await fetch(`${SITE}/data/${id}/${name}`);
         if (!res.ok) throw new Error(`${res.status} ${name}`);
+        const body = Buffer.from(await res.arrayBuffer());
+        noteLogos(body.toString('utf8'));
         await mkdir(path.dirname(path.join(dir, name)), { recursive: true });
-        await writeFile(path.join(dir, name), Buffer.from(await res.arrayBuffer()));
+        await writeFile(path.join(dir, name), body);
       }));
     }
     await write(path.join(dir, 'files.json'), list);
@@ -139,6 +145,28 @@ async function carryOver(id: string): Promise<boolean> {
     console.warn(`  no published data to keep for ${id}:`, (error as Error).message);
     return false;
   }
+}
+
+/**
+ * Copies of the logos teams uploaded to ESPN: those load only with an ESPN login, which a phone
+ * viewing this site doesn't send. When ESPN won't serve one (an expired login), the last deploy's copy.
+ */
+async function publishLogos(): Promise<number> {
+  let copied = 0;
+  for (const file of logoFiles) {
+    const image = await espnLogo(file).catch(async (error: Error) => {
+      const res = SITE ? await fetch(`${SITE}/data/espn-logos/${file}`).catch(() => null) : null;
+      if (res?.ok) return res.arrayBuffer();
+      console.warn(`  logo ${file} unavailable:`, error.message);
+      return null;
+    });
+    if (!image) continue;
+    await mkdir(path.join(OUT, 'espn-logos'), { recursive: true });
+    await writeFile(path.join(OUT, 'espn-logos', file), Buffer.from(image));
+    bytes += image.byteLength;
+    copied++;
+  }
+  return copied;
 }
 
 /** Publish saved pregame forecasts (and an index of them) so the next run can pull them back. */
@@ -179,8 +207,9 @@ for (const id of LEAGUES) {
 await write(path.join(OUT, 'leagues.json'), (await views.configuredLeagues(DEFAULT_LEAGUE)).filter(l => built.includes(l.id)));
 await write(path.join(OUT, 'model.json'), views.model());
 const snapshots = await publishSnapshots();
+const logos = await publishLogos();
 await write(path.join(OUT, 'manifest.json'), { builtAt: new Date().toISOString(), leagues: built, guest: GUEST && built.includes(GUEST) ? GUEST : null, guestError });
-console.log(`static data: ${built.length} leagues, ${snapshots} snapshot files, ${(bytes / 1e6).toFixed(1)} MB in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+console.log(`static data: ${built.length} leagues, ${snapshots} snapshot files, ${logos} ESPN logos, ${(bytes / 1e6).toFixed(1)} MB in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 // Nothing at all to publish is a failed build; a league carried over from the last deploy is not.
 // A temporary league that can't be built (a mistyped ID) doesn't hold back the others.
 process.exit(built.length === 0 || failed === CONFIGURED.length ? 1 : 0);

@@ -28,6 +28,7 @@ describe('static deployment', () => {
     expect(v('/api/leagues/123/teams/4/waivers')).toBe('/data/123/waivers-4.json');
     expect(v('/api/leagues/123/players/4046')).toBe('/data/123/players/4046.json');
     expect(v('/api/leagues/123/trade-kit')).toBe('/data/123/trade-kit.json');
+    expect(staticUrl('/api/espn-logos/54504790-a59a-11f1-8623-4f919cfbc4d9.jpg')).toBe('/data/espn-logos/54504790-a59a-11f1-8623-4f919cfbc4d9.jpg');
     // Needs a live server: searching Sleeper for any user's leagues.
     expect(staticUrl('/api/users/someone/leagues')).toBeNull();
   });

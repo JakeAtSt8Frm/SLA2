@@ -116,6 +116,40 @@ export async function espnWrite(route: string, body: Raw): Promise<{ status: num
   return { status: res.status, body: parsed };
 }
 
+// ─── Team logos ──────────────────────────────────────────────────────────────
+
+/** Logos uploaded to ESPN load only with an ESPN login, so the app serves its own copies of them. */
+const UPLOADED_LOGO = /^https:\/\/mystique-api\.fantasy\.espn\.com\/apis\/v1\/domains\/lm\/images\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+/** A copied logo's file name: ESPN stores uploads as JPEGs. */
+export const LOGO_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/;
+/** Where the app loads a team's logo: uploaded ones from /api/espn-logos (the static build copies them), ESPN's stock logos as they are. */
+export function teamLogo(url: string | null): string | null {
+  const m = url ? UPLOADED_LOGO.exec(url) : null;
+  return m ? `/api/espn-logos/${m[1].toLowerCase()}.jpg` : url;
+}
+
+const logos = new Map<string, Promise<ArrayBuffer>>();
+/** An uploaded logo, by its LOGO_FILE name, fetched with the saved login (kept for the life of the process). */
+export function espnLogo(file: string): Promise<ArrayBuffer> {
+  let p = logos.get(file);
+  if (!p) {
+    p = (async () => {
+      if (!LOGO_FILE.test(file)) throw Object.assign(new Error(`Bad logo ${file}`), { status: 404 });
+      if (!config.swid || !config.espnS2) throw Object.assign(new Error('ESPN credentials are not configured.'), { status: 503 });
+      const res = await fetch(`https://mystique-api.fantasy.espn.com/apis/v1/domains/lm/images/${file.slice(0, -4)}`, {
+        headers: { Cookie: `SWID=${config.swid}; espn_s2=${config.espnS2}`, 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) throw Object.assign(new Error(`ESPN logo ${file}: ${res.status}`), { status: res.status });
+      return await res.arrayBuffer();
+    })();
+    // A failure (an expired login, a blip) is tried again next time.
+    p.catch(() => logos.delete(file));
+    logos.set(file, p);
+  }
+  return p;
+}
+
 /** The saved login's own team. A commissioner's login can edit any team, so moves must check this. */
 export const ownsTeam = (team: unknown) => arr(obj(team).owners).includes(config.swid);
 
@@ -368,7 +402,7 @@ function parseEspnLeague(id: string, raw: Raw, season: number, current: boolean,
     // ESPN hands out handles like "ESPNFAN4959722663"; a real name reads better when there is one.
     const handle = m ? str(m.displayName) : null;
     const generated = !handle || /^espn(fan)?\d+$/i.test(handle);
-    users.push({ userId: ownerId, displayName: (generated ? person || handle : handle) || teamName, teamName, avatar: str(t.logo) });
+    users.push({ userId: ownerId, displayName: (generated ? person || handle : handle) || teamName, teamName, avatar: teamLogo(str(t.logo)) });
     const entries = arr(obj(t.roster).entries).map(obj);
     const bySlot = new Map<number, string[]>();
     const all: string[] = [];

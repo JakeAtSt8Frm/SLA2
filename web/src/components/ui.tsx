@@ -5,6 +5,7 @@ import { INJURY_SHORT, posLabel, teamColor } from '../lib/format.ts';
 import { usePlatform } from '../lib/context.tsx';
 import { useApp } from '../lib/context.tsx';
 import { navigate, pathFor } from '../lib/router.ts';
+import { imageUrl } from '../lib/api.ts';
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
@@ -162,7 +163,7 @@ export function TeamAvatar({ rosterId, size = 28 }: { rosterId: number; size?: n
   return (
     <span className="relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-bold text-ink"
       style={{ width: size, height: size, background: `color-mix(in oklab, ${teamColor(rosterId)} 25%, var(--surface-2))`, boxShadow: `0 0 0 2px ${teamColor(rosterId)}` }}>
-      {t?.avatar && !failed ? <img src={t.avatar} alt="" className="h-full w-full object-cover" onError={() => setFailed(true)} /> : initials}
+      {t?.avatar && !failed ? <img src={imageUrl(t.avatar)} alt="" className="h-full w-full object-cover" onError={() => setFailed(true)} /> : initials}
     </span>
   );
 }

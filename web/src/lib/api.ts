@@ -52,6 +52,7 @@ export function staticUrl(url: string): string | null {
   const u = new URL(url, 'http://local');
   const parts = u.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'model' && parts.length === 1) return `${DATA}/model.json`;
+  if (parts[0] === 'espn-logos' && parts.length === 2) return `${DATA}/espn-logos/${encodeURIComponent(parts[1])}`;
   if (parts[0] !== 'leagues') return null;
   if (parts.length === 1) return `${DATA}/leagues.json`;
   const [, id, view, a, b] = parts;
@@ -67,6 +68,9 @@ export function staticUrl(url: string): string | null {
   if (view && !a) return `${dir}/${view}.json${v}`;
   return null;
 }
+
+/** An image the app serves itself (a copy of an ESPN team logo), at its address in this deployment; other URLs as they are. */
+export const imageUrl = (url: string) => (STATIC && url.startsWith('/api/') ? staticUrl(url) ?? url : url);
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response;

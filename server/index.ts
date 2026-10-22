@@ -5,7 +5,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getCore, refreshCore } from './league.ts';
-import { configuredEspnLeagues, validEspnId } from './espn.ts';
+import { configuredEspnLeagues, espnLogo, LOGO_FILE, validEspnId } from './espn.ts';
 import { findLeagues } from './sleeper.ts';
 import { sendJson } from './http.ts';
 import { recordSnapshot, trackRecord } from './snapshots.ts';
@@ -104,6 +104,13 @@ app.get('/api/users/:username/leagues', async c => {
   const username = c.req.param('username');
   if (!/^[A-Za-z0-9_.-]{2,40}$/.test(username)) throw new HttpError(400, 'Enter a Sleeper username.');
   return json(c, await findLeagues(username), 300);
+});
+// Team logos uploaded to ESPN, which load only with the ESPN login (server/espn.ts teamLogo).
+app.get('/api/espn-logos/:file', async c => {
+  const file = c.req.param('file');
+  if (!LOGO_FILE.test(file)) throw new HttpError(404, 'Not found');
+  const image = await espnLogo(file).catch((error: { status?: number }) => { throw new HttpError(error.status === 404 ? 404 : 502, 'Logo unavailable'); });
+  return c.body(image, 200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' });
 });
 app.all('/api/*', () => { throw new HttpError(404, 'Not found'); });
 
