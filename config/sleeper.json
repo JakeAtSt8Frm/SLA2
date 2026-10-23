@@ -1,0 +1,9 @@
+{
+  "_note": "Sleeper leagues saved from the app, besides the default league: every deploy builds them and the league switcher lists them. The app edits this file (Deploy workflow: save_league / forget_league).",
+  "leagues": [
+    {
+      "id": "1399265965505576960",
+      "name": "UKCOM M3 26/27"
+    }
+  ]
+}
