@@ -223,6 +223,9 @@ export const useCancelClaim = (id: string) => {
 
 /** The local server re-checks the league's inputs now (Refresh); the static site rebuilds instead (lib/site-build.ts). */
 export const refreshLeague = (id: string) => request<{ generatedAt: string }>(`${base(id)}/refresh`, { method: 'POST' });
+/** Local server: save a Sleeper league opened by ID in config/sleeper.json, or remove it (the static site does this in a build). */
+export const saveLeagueLocally = (id: string) => request<{ ok: boolean }>(`${base(id)}/save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+export const forgetLeagueLocally = (id: string) => request<{ ok: boolean }>(`${base(id)}/save`, { method: 'DELETE' });
 
 // ─── Sleeper lookups from the browser ────────────────────────────────────────
 // The static site has no server: it asks Sleeper directly (Sleeper allows cross-origin requests).

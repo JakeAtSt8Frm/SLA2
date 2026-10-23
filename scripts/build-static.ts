@@ -18,13 +18,14 @@ import { refreshesSettled } from '../server/cache.ts';
 import { claimSnapshot } from '../server/claims.ts';
 import { configuredEspnLeagues, espnLogo, isEspnId } from '../server/espn.ts';
 import { getCore, refreshCore, type LeagueCore } from '../server/league.ts';
+import { configuredSleeperIds } from '../server/saved-leagues.ts';
 import { recordSnapshot, SNAPSHOT_DIR, trackRecord } from '../server/snapshots.ts';
 import * as views from '../server/views.ts';
 
 const OUT = path.resolve(process.argv[2] ?? path.join(import.meta.dirname, '..', 'dist', 'data'));
 const SITE = (process.env.SLA_SITE_URL ?? '').replace(/\/+$/, '');
-const DEFAULT_LEAGUE = process.env.SLA_DEFAULT_LEAGUE ?? '1312656463549726720';
-const CONFIGURED = [...new Set([DEFAULT_LEAGUE, ...(process.env.SLA_LEAGUES ?? '').split(',').map(x => x.trim()).filter(Boolean), ...configuredEspnLeagues().map(l => l.id)])];
+// The default league, SLA_LEAGUES and leagues saved from the app (config/sleeper.json), then ESPN's.
+const CONFIGURED = [...new Set([...configuredSleeperIds(), ...configuredEspnLeagues().map(l => l.id)])];
 
 /** The temporary league: the one just requested, else the one the live site already carries. */
 async function guestLeague(): Promise<string | null> {
@@ -204,7 +205,7 @@ for (const id of LEAGUES) {
   }
 }
 // The switcher lists only the configured leagues; the temporary one is listed by the page that has it open.
-await write(path.join(OUT, 'leagues.json'), (await views.configuredLeagues(DEFAULT_LEAGUE)).filter(l => built.includes(l.id)));
+await write(path.join(OUT, 'leagues.json'), (await views.configuredLeagues()).filter(l => built.includes(l.id)));
 await write(path.join(OUT, 'model.json'), views.model());
 const snapshots = await publishSnapshots();
 const logos = await publishLogos();

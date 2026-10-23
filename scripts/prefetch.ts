@@ -4,10 +4,11 @@
  * Covers the default Sleeper league and every ESPN league in config/espn.json.
  */
 import { configuredEspnLeagues } from '../server/espn.ts';
+import { configuredSleeperIds } from '../server/saved-leagues.ts';
 import { getCore } from '../server/league.ts';
 import { history } from '../server/views.ts';
 
-const leagues = [process.env.SLA_DEFAULT_LEAGUE ?? '1312656463549726720', ...configuredEspnLeagues().map(l => l.id)];
+const leagues = [...configuredSleeperIds(), ...configuredEspnLeagues().map(l => l.id)];
 for (const league of leagues) {
   const t = Date.now();
   try {

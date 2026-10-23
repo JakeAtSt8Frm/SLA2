@@ -6,7 +6,7 @@
 import { useSyncExternalStore } from 'react';
 import { GitHubError } from './github.ts';
 import { navigate, pathFor } from './router.ts';
-import { dismissSiteRefresh, followSiteBuild, fresh, manifest, sleep, type BuildPhase } from './site-build.ts';
+import { followSiteBuild, fresh, manifest, sleep, supersedeRefresh, type BuildPhase } from './site-build.ts';
 
 export interface LeagueLoad {
   id: string;
@@ -41,11 +41,10 @@ let generation = 0;
 export async function loadLeague(id: string, name: string): Promise<void> {
   const mine = ++generation;
   const alive = () => generation === mine;
-  // This build rebuilds every league too, so a refresh waiting on its own build can stop.
-  dismissSiteRefresh();
+  supersedeRefresh();
   set({ id, name, phase: 'starting', error: null, tokenProblem: false, runUrl: null, startedAt: Date.now() });
   try {
-    const createdAt = await followSiteBuild(id, alive, p => patch(p));
+    const createdAt = await followSiteBuild({ guest_league: id }, alive, p => patch(p));
     if (createdAt === null) return;
     patch({ phase: 'publishing' });
     for (let i = 0; i < 45 && alive(); i++) {

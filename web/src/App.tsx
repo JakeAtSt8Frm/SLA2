@@ -13,7 +13,7 @@ import { dismissLeagueLoad, isPublished, loadLeague, useLeagueLoad, type LeagueL
 import { atLeagueRoute, isLeagueId, navigate, pathFor, rememberLeague, startLeague, useRoute, type Page } from './lib/router.ts';
 import { Button, cx, ErrorState, PageSkeleton, Select, TeamAvatar, useEscape } from './components/ui.tsx';
 import { TokenCheck, TokenSetup, useToken } from './components/GitHubToken.tsx';
-import { RefreshStatus, RefreshTokenDialog, useRefreshData } from './components/SiteRefresh.tsx';
+import { SiteJobStatus, SiteJobTokenDialog, useRefreshData, useSavedLeagues } from './components/SiteRefresh.tsx';
 import { PlayerDrawer } from './components/PlayerDrawer.tsx';
 
 const pageModules: Record<Page, () => Promise<{ default: ComponentType }>> = {
@@ -242,8 +242,8 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
       <div className="border-t border-line px-4 py-2 sm:hidden">
         <Select label="Your team" value={myTeamId ?? 0} onChange={v => setMyTeam(v === 0 ? null : v)} options={[{ value: 0, label: 'Choose your team…' }, ...boot.teams.map(t => ({ value: t.rosterId, label: t.name }))]} className="w-full" />
       </div>
-      <RefreshStatus />
-      <RefreshTokenDialog />
+      <SiteJobStatus />
+      <SiteJobTokenDialog />
       {finder && <LeagueDialog onClose={() => setFinder(false)} />}
     </header>
   );
@@ -270,7 +270,7 @@ function PickTeam() {
 function LeagueDialog({ onClose }: { onClose: () => void }) {
   const dialog = useEscape(onClose);
   const { leagueId, boot } = useApp();
-  const current: ConfiguredLeague = { id: leagueId, name: boot.league.name, platform: boot.league.platform, season: boot.league.season, teams: boot.league.totalRosters, dynasty: boot.league.isDynasty };
+  const current: ConfiguredLeague = { id: leagueId, name: boot.league.name, platform: boot.league.platform, season: boot.league.season, teams: boot.league.totalRosters, dynasty: boot.league.isDynasty, saved: false };
   // Portal: the sticky, blurred header is its own stacking context and would trap the overlay beneath the page.
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--overlay)] p-4 pt-[12vh]" onClick={onClose}>
@@ -291,10 +291,13 @@ function LeagueDialog({ onClose }: { onClose: () => void }) {
 
 /**
  * The leagues this deployment is set up for (Sleeper and ESPN), one click away. A league opened by
- * ID or username (`current`, when it isn't one of them) is listed as temporary while it's open.
+ * ID or username (`current`, when it isn't one of them) is listed as temporary while it's open, and
+ * can be saved to stay in the list; leagues saved that way can be removed again.
  */
 function YourLeagues({ onDone, current }: { onDone: () => void; current?: ConfiguredLeague }) {
   const leagues = useLeagues();
+  const saved = useSavedLeagues();
+  const [confirming, setConfirming] = useState<string | null>(null);
   // Also shown on the error screen, where no league is open.
   const leagueId = useRoute().leagueId;
   const list: (ConfiguredLeague & { temporary?: boolean })[] = [...(leagues.data ?? [])];
@@ -304,18 +307,38 @@ function YourLeagues({ onDone, current }: { onDone: () => void; current?: Config
   return (
     <div className="space-y-1">
       <div className="eyebrow mb-2">Your leagues</div>
-      {list.map(l => (
-        <button key={l.id} onClick={() => { onDone(); if (l.id !== leagueId) navigate(pathFor(l.id, 'hub')); }} aria-current={l.id === leagueId ? 'true' : undefined}
-          className={cx('flex w-full items-center gap-3 rounded-[9px] p-2 text-left hover:bg-surface-2', l.id === leagueId && 'bg-surface-2')}>
-          <span className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold', l.platform === 'espn' ? 'bg-[color-mix(in_oklab,#d00_18%,var(--surface-2))] text-ink' : 'bg-surface-3 text-ink-2')}>{l.platform === 'espn' ? 'ESPN' : 'SLPR'}</span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-medium">{l.name}</span>
-            <span className="block text-[12px] text-ink-3">{[l.season, l.teams ? `${l.teams} teams` : null, l.dynasty ? 'dynasty' : 'redraft', l.temporary ? 'temporary' : null].filter(Boolean).join(' · ')}</span>
-          </span>
-          {l.id === leagueId && <span className="text-[12px] text-ink-3">Current</span>}
-        </button>
-      ))}
-      {temporary && <p className="px-2 pt-1 text-[12px] text-ink-3">{current.name} stays open, here and when you reopen the app, until you switch to another league.</p>}
+      {list.map(l => {
+        const here = l.id === leagueId;
+        const busy = saved.busy(l.id);
+        return (
+          <div key={l.id} className={cx('flex items-center gap-2 rounded-[9px] pr-2 hover:bg-surface-2', here && 'bg-surface-2')}>
+            <button onClick={() => { onDone(); if (!here) navigate(pathFor(l.id, 'hub')); }} aria-current={here ? 'true' : undefined} className="flex min-w-0 flex-1 items-center gap-3 p-2 text-left">
+              <span className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold', l.platform === 'espn' ? 'bg-[color-mix(in_oklab,#d00_18%,var(--surface-2))] text-ink' : 'bg-surface-3 text-ink-2')}>{l.platform === 'espn' ? 'ESPN' : 'SLPR'}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{l.name}</span>
+                <span className="block text-[12px] text-ink-3">{[l.season, l.teams ? `${l.teams} teams` : null, l.dynasty ? 'dynasty' : 'redraft', l.temporary ? 'temporary' : null].filter(Boolean).join(' · ')}</span>
+              </span>
+            </button>
+            {busy ? <span className="flex items-center gap-1 text-[12px] text-ink-3"><LoaderCircle size={12} className="animate-spin" aria-hidden />{busy === 'save' ? 'Saving…' : 'Removing…'}</span>
+              : l.temporary && l.platform === 'sleeper' ? <Button size="sm" onClick={() => saved.save(l)} title="Keep this league in the list and build it every time">Save</Button>
+              : l.saved && !here && confirming === l.id ? (
+                <span className="flex items-center gap-2 text-[12px]">
+                  <button className="font-semibold text-bad-ink underline" onClick={() => { setConfirming(null); saved.forget(l); }}>Remove</button>
+                  <button className="text-ink-3 underline hover:text-ink" onClick={() => setConfirming(null)}>Keep</button>
+                </span>
+              )
+              : l.saved && !here ? <button className="rounded-md p-1 text-ink-3 hover:bg-surface-3 hover:text-ink" onClick={() => setConfirming(l.id)} aria-label={`Remove ${l.name}`} title="Remove this saved league"><X size={14} aria-hidden /></button>
+              : here ? <span className="text-[12px] text-ink-3">Current</span> : null}
+          </div>
+        );
+      })}
+      {saved.error && <p className="px-2 pt-1 text-[12px] text-bad-ink">{saved.error}</p>}
+      {temporary && (
+        <p className="px-2 pt-1 text-[12px] text-ink-3">
+          {current.name} stays open, here and when you reopen the app, until you switch to another league.
+          {current.platform === 'sleeper' ? ` Save it to keep it in this list${STATIC ? '; that rebuilds the site, about a minute' : ''}.` : ''}
+        </p>
+      )}
     </div>
   );
 }

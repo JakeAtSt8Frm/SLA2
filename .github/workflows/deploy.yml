@@ -4,7 +4,8 @@
 #
 # The site can also load a Sleeper league that isn't set up here: it starts this workflow with
 # guest_league (web/src/lib/github.ts). That temporary league is rebuilt with the others until the
-# site asks for a different one.
+# site asks for a different one. Saving a league from the site (save_league / forget_league) commits
+# config/sleeper.json first, so this and every later build includes it.
 name: Deploy
 
 on:
@@ -14,6 +15,16 @@ on:
     inputs:
       guest_league:
         description: 'Temporary Sleeper league to build too, until another replaces it (none = drop it; blank keeps the current one)'
+        required: false
+        type: string
+        default: ''
+      save_league:
+        description: 'Sleeper league to save in config/sleeper.json (built every time, listed in the app)'
+        required: false
+        type: string
+        default: ''
+      forget_league:
+        description: 'Saved Sleeper league to remove from config/sleeper.json'
         required: false
         type: string
         default: ''
@@ -38,17 +49,56 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Saving or removing a league from the app's league switcher. A push made with the workflow token
+  # doesn't start another deploy; the deploy job below builds from this commit.
+  save:
+    if: inputs.save_league != '' || inputs.forget_league != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - id: save
+        name: Update config/sleeper.json
+        run: node scripts/save-league.ts
+        env:
+          SAVE_LEAGUE: ${{ inputs.save_league }}
+          FORGET_LEAGUE: ${{ inputs.forget_league }}
+
+      - name: Commit
+        env:
+          MESSAGE: ${{ steps.save.outputs.message }}
+        run: |
+          git add config/sleeper.json
+          if git diff --cached --quiet; then echo "Nothing to change"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "$MESSAGE"
+          git pull --rebase --quiet
+          git push
+
   deploy:
+    needs: save
     # Off until GitHub Pages is turned on for the repository (Pages on a private repository needs a paid
     # plan); then set the repository variable PAGES_ENABLED to true. A skipped job uses no Actions minutes.
-    if: vars.PAGES_ENABLED == 'true'
+    # Runs when there was nothing to save, too (the save job is skipped then).
+    if: ${{ !cancelled() && vars.PAGES_ENABLED == 'true' && (needs.save.result == 'success' || needs.save.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # The branch as it is now, so a league the save job just committed is included.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
 
       - uses: actions/setup-node@v7
         with:

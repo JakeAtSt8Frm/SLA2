@@ -6,6 +6,7 @@ import { getCore, modelFor, onCoreBuilt, playoffShape, type LeagueCore } from '.
 import { sleeper, type SleeperMatchup } from './sleeper.ts';
 import { sourceFor } from './source.ts';
 import { configuredEspnLeagues } from './espn.ts';
+import { configuredSleeperIds, savedLeagues } from './saved-leagues.ts';
 import { explainInputs, outcomeOf, type WeekForecast } from '../engine/forecast.ts';
 import { exceedProbability, normalCdf, variance, type Outcome } from '../engine/distribution.ts';
 import { lineupStats } from '../engine/lineup.ts';
@@ -1029,15 +1030,17 @@ onCoreBuilt(core => {
 // ─── Configured leagues (league switcher) ────────────────────────────────────
 
 /** Every league this deployment is set up for, with display names. Credentials never leave the server. */
-export async function configuredLeagues(defaultLeague: string) {
-  const ids = [...new Set([defaultLeague, ...(process.env.SLA_LEAGUES ?? '').split(',').map(x => x.trim()).filter(Boolean)])];
-  const entries = [...ids.map(id => ({ id, name: '', platform: 'sleeper' as const })), ...configuredEspnLeagues()];
+export async function configuredLeagues() {
+  // `saved`: saved from the app (config/sleeper.json), so the app can remove it again.
+  const saved = new Map(savedLeagues().map(l => [l.id, l.name]));
+  const entries = [...configuredSleeperIds().map(id => ({ id, name: saved.get(id) ?? '', platform: 'sleeper' as const })), ...configuredEspnLeagues()];
   const out = await Promise.all(entries.map(async e => {
+    const base = { id: e.id, platform: e.platform, saved: saved.has(e.id) };
     try {
       const lg = await sourceFor(e.id).league();
-      return { id: e.id, name: lg.name || e.name, platform: e.platform, season: lg.season, teams: lg.totalRosters, dynasty: lg.isDynasty };
+      return { ...base, name: lg.name || e.name, season: lg.season, teams: lg.totalRosters, dynasty: lg.isDynasty };
     } catch {
-      return e.name ? { id: e.id, name: e.name, platform: e.platform, season: null, teams: null, dynasty: false } : null;
+      return e.name ? { ...base, name: e.name, season: null, teams: null, dynasty: false } : null;
     }
   }));
   return out.filter(x => x !== null);

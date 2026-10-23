@@ -6,14 +6,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getCore, refreshCore } from './league.ts';
 import { configuredEspnLeagues, espnLogo, LOGO_FILE, validEspnId } from './espn.ts';
-import { findLeagues } from './sleeper.ts';
+import { findLeagues, sleeper } from './sleeper.ts';
+import { configuredSleeperIds, isSleeperId, updateSaved } from './saved-leagues.ts';
 import { sendJson } from './http.ts';
 import { recordSnapshot, trackRecord } from './snapshots.ts';
 import { cancelClaim, claimInfo, createClaim, resumeClaims, type ClaimRequest } from './claims.ts';
 import * as views from './views.ts';
 import { HttpError } from './views.ts';
 
-export const DEFAULT_LEAGUE = process.env.SLA_DEFAULT_LEAGUE ?? '1312656463549726720';
 const PORT = Number(process.env.PORT ?? 8787);
 const DIST = path.resolve(import.meta.dirname, '..', 'dist');
 
@@ -34,7 +34,7 @@ const json = (c: Context, data: object, maxAge = 0) => sendJson(c, data, maxAge)
 
 app.get('/api/health', c => c.json({ ok: true, service: 'sla2', time: new Date().toISOString() }));
 app.get('/api/model', c => json(c, views.model(), 300));
-app.get('/api/leagues', async c => json(c, await views.configuredLeagues(DEFAULT_LEAGUE), 300));
+app.get('/api/leagues', async c => json(c, await views.configuredLeagues()));
 app.get('/api/leagues/:id/model', c => json(c, views.model(leagueId(c)), 300));
 app.get('/api/leagues/:id/bootstrap', async c => {
   const id = leagueId(c);
@@ -75,7 +75,7 @@ const localOnly: MiddlewareHandler = async (c, next) => {
   const origin = c.req.header('origin');
   let originHost = '';
   try { originHost = origin ? new URL(origin).host : ''; } catch { originHost = 'invalid'; }
-  if (!LOCAL_HOST.test(c.req.header('host') ?? '') || (origin !== undefined && !LOCAL_HOST.test(originHost))) throw new HttpError(403, 'Auto-claims only work from this computer.');
+  if (!LOCAL_HOST.test(c.req.header('host') ?? '') || (origin !== undefined && !LOCAL_HOST.test(originHost))) throw new HttpError(403, 'This only works from the computer running SLA.');
   if (c.req.method === 'POST' && !(c.req.header('content-type') ?? '').startsWith('application/json')) throw new HttpError(415, 'Send JSON.');
   c.header('Cache-Control', 'no-store');
   await next();
@@ -98,6 +98,16 @@ app.get('/api/leagues/:id/defense', async c => {
 });
 app.get('/api/leagues/:id/transactions', async c => json(c, await views.transactions(leagueId(c))));
 app.get('/api/leagues/:id/tracking', async c => json(c, await trackRecord(await getCore(leagueId(c)))));
+// Save a Sleeper league opened by ID (or remove a saved one): written to config/sleeper.json on this computer.
+app.use('/api/leagues/:id/save', localOnly);
+app.post('/api/leagues/:id/save', async c => {
+  const id = leagueId(c);
+  if (!isSleeperId(id)) throw new HttpError(400, 'Only Sleeper leagues can be saved.');
+  const league = await sleeper.league(id);
+  await updateSaved({ save: { id, name: league.name.trim() || id } });
+  return c.json({ ok: true });
+});
+app.delete('/api/leagues/:id/save', async c => c.json({ ok: await updateSaved({ forget: leagueId(c) }) }));
 // The app's Refresh button: re-check Sleeper/ESPN now instead of when the freshness window runs out.
 app.post('/api/leagues/:id/refresh', async c => c.json({ generatedAt: (await refreshCore(leagueId(c))).generatedAt }));
 app.get('/api/users/:username/leagues', async c => {
@@ -143,7 +153,7 @@ serve({ fetch: app.fetch, port: PORT, hostname: process.env.HOST ?? '127.0.0.1' 
   console.log(`SLA 2.0 API listening on http://${info.address}:${info.port}`);
   // Warm every configured league, one at a time (small hosts have a fraction of a CPU), so first loads are instant.
   void (async () => {
-    for (const id of [DEFAULT_LEAGUE, ...configuredEspnLeagues().map(l => l.id)]) {
+    for (const id of [...configuredSleeperIds(), ...configuredEspnLeagues().map(l => l.id)]) {
       const t = Date.now();
       try {
         const core = await getCore(id);

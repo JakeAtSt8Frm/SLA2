@@ -1,12 +1,12 @@
 /**
  * Site builds started from the static site (.github/workflows/deploy.yml). The data on GitHub Pages
  * is rebuilt on a schedule; Refresh asks for a build now, so lineups set in Sleeper since then show
- * up in about a minute, and lib/league-load.ts adds a temporary league the same way. Both follow the
- * run on GitHub, then wait for Pages to serve the result.
+ * up in about a minute. Saving or removing a league, and adding a temporary one (lib/league-load.ts),
+ * work the same way. Each follows the run on GitHub, then waits for Pages to serve the result.
  */
 import { useSyncExternalStore } from 'react';
 import { STATIC } from './api.ts';
-import { buildRun, findSiteBuild, getToken, GitHubError, githubRepo, startSiteBuild } from './github.ts';
+import { buildRun, findSiteBuild, getToken, GitHubError, githubRepo, startSiteBuild, type SiteBuildInputs } from './github.ts';
 
 /** This site can start its own builds (the static deployment, linked to its GitHub repository). */
 export const canRebuild = STATIC && githubRepo.length > 0;
@@ -29,11 +29,11 @@ const RETRIES = 3;
  * Starts a build and follows it to the end. Resolves with when GitHub created the successful run
  * (its clock, like the build's own timestamps), or null once `alive` turns false.
  */
-export async function followSiteBuild(guestLeague: string, alive: () => boolean, progress: (p: { phase: BuildPhase; runUrl?: string }) => void): Promise<number | null> {
+export async function followSiteBuild(inputs: SiteBuildInputs, alive: () => boolean, progress: (p: { phase: BuildPhase; runUrl?: string }) => void): Promise<number | null> {
   for (let attempt = 0; ; attempt++) {
     progress({ phase: 'starting' });
     const requestedAt = Date.now();
-    let run = await startSiteBuild(guestLeague);
+    let run = await startSiteBuild(inputs);
     for (let i = 0; !run && i < 6 && alive(); i++) { await sleep(2500); run = await findSiteBuild(requestedAt); }
     if (!alive()) return null;
     if (!run) throw new Error('GitHub started the build but hasn’t listed it yet. The site updates when it finishes.');
@@ -56,9 +56,12 @@ export async function followSiteBuild(guestLeague: string, alive: () => boolean,
   }
 }
 
-// ─── Refresh ─────────────────────────────────────────────────────────────────
+// ─── Site jobs: Refresh, and saving or removing a league ─────────────────────
 
-export interface SiteRefresh {
+export type SiteJobKind = { kind: 'refresh' } | { kind: 'save' | 'forget'; league: string; name: string };
+
+export interface SiteJob {
+  job: SiteJobKind;
   /** `token`: waiting for a GitHub token to be added on this device. */
   phase: 'token' | BuildPhase | 'publishing' | 'failed';
   error: string | null;
@@ -67,30 +70,39 @@ export interface SiteRefresh {
   startedAt: number;
 }
 
-let state: SiteRefresh | null = null;
+let state: SiteJob | null = null;
 const listeners = new Set<() => void>();
-const set = (next: SiteRefresh | null) => { state = next; listeners.forEach(l => l()); };
-const patch = (p: Partial<SiteRefresh>) => { if (state) set({ ...state, ...p }); };
-export const siteRefresh = () => state;
-export const useSiteRefresh = () => useSyncExternalStore(cb => { listeners.add(cb); return () => { listeners.delete(cb); }; }, siteRefresh);
+const set = (next: SiteJob | null) => { state = next; listeners.forEach(l => l()); };
+const patch = (p: Partial<SiteJob>) => { if (state) set({ ...state, ...p }); };
+export const siteJob = () => state;
+export const useSiteJob = () => useSyncExternalStore(cb => { listeners.add(cb); return () => { listeners.delete(cb); }; }, siteJob);
+/** A build is on its way (not waiting for a token, not failed). */
+export const jobRunning = (job: SiteJob | null) => !!job && job.phase !== 'failed' && job.phase !== 'token';
+
+const inputsFor = (job: SiteJobKind): SiteBuildInputs =>
+  job.kind === 'save' ? { save_league: job.league } : job.kind === 'forget' ? { forget_league: job.league } : {};
 
 let generation = 0;
 let onPublished: () => void = () => undefined;
-const running = () => !!state && state.phase !== 'failed' && state.phase !== 'token';
 
-/** Rebuild every league now; `published` runs once Pages serves the new build. One at a time. */
-export async function refreshSite(published: () => void): Promise<void> {
-  if (!canRebuild || running()) return;
+/**
+ * Starts a site build for `job`; `published` runs once Pages serves it. One job at a time: a refresh
+ * while another job runs does nothing (that build rebuilds everything too), and saving or removing a
+ * league takes over from a running refresh.
+ */
+export async function startSiteJob(job: SiteJobKind, published: () => void): Promise<void> {
+  if (!canRebuild) return;
+  if (jobRunning(state) && (job.kind === 'refresh' || state!.job.kind !== 'refresh')) return;
   onPublished = published;
-  if (!getToken()) {
-    set({ phase: 'token', error: null, tokenProblem: false, runUrl: null, startedAt: Date.now() });
-    return;
-  }
   const mine = ++generation;
   const alive = () => generation === mine;
-  set({ phase: 'starting', error: null, tokenProblem: false, runUrl: null, startedAt: Date.now() });
+  if (!getToken()) {
+    set({ job, phase: 'token', error: null, tokenProblem: false, runUrl: null, startedAt: Date.now() });
+    return;
+  }
+  set({ job, phase: 'starting', error: null, tokenProblem: false, runUrl: null, startedAt: Date.now() });
   try {
-    const createdAt = await followSiteBuild('', alive, p => patch(p));
+    const createdAt = await followSiteBuild(inputsFor(job), alive, p => patch(p));
     if (createdAt === null) return;
     patch({ phase: 'publishing' });
     for (let i = 0; i < 45 && alive(); i++) {
@@ -108,15 +120,21 @@ export async function refreshSite(published: () => void): Promise<void> {
   }
 }
 
-/** The token was added: start the refresh that was waiting for it. */
-export function resumeRefresh() {
+/** The token was added: start the job that was waiting for it. */
+export function resumeSiteJob() {
   if (state?.phase !== 'token') return;
+  const { job } = state;
   set(null);
-  void refreshSite(onPublished);
+  void startSiteJob(job, onPublished);
 }
 
 /** Stops following the build (one already started still updates the site). */
-export function dismissSiteRefresh() {
+export function dismissSiteJob() {
   generation++;
   set(null);
+}
+
+/** A league build rebuilds everything too: a refresh waiting on its own build can stop. */
+export function supersedeRefresh() {
+  if (state?.job.kind === 'refresh') dismissSiteJob();
 }

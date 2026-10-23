@@ -27,7 +27,7 @@ beforeAll(async () => {
   siteBuild = await import('../web/src/lib/site-build.ts');
   gh.setToken('github_pat_test');
 });
-afterEach(() => { calls.length = 0; vi.useRealTimers(); load.dismissLeagueLoad(); siteBuild.dismissSiteRefresh(); });
+afterEach(() => { calls.length = 0; vi.useRealTimers(); load.dismissLeagueLoad(); siteBuild.dismissSiteJob(); });
 
 const GUEST = '1257479498937454592';
 
@@ -56,7 +56,7 @@ function site(scripts: { status: string; conclusion?: string }[][], published: (
 describe('temporary leagues on the static site', () => {
   it('starts the Deploy workflow with the league as guest_league and asks for the run it started', async () => {
     site([[{ status: 'queued' }]], () => false);
-    expect(await gh.startSiteBuild(GUEST)).toEqual({ id: 901, url: 'https://github.com/owner/repo/actions/runs/901' });
+    expect(await gh.startSiteBuild({ guest_league: GUEST })).toEqual({ id: 901, url: 'https://github.com/owner/repo/actions/runs/901' });
     expect(calls[0].url).toBe('https://api.github.com/repos/owner/repo/actions/workflows/deploy.yml/dispatches');
     expect(JSON.parse(String(calls[0].init?.body))).toEqual({ ref: 'main', inputs: { guest_league: GUEST }, return_run_details: true });
   });
@@ -108,18 +108,18 @@ describe('Refresh on the static site', () => {
   it('asks for a GitHub token first on a device without one, then carries on', async () => {
     gh.setToken(null);
     const published = vi.fn();
-    await siteBuild.refreshSite(published);
-    expect(siteBuild.siteRefresh()).toMatchObject({ phase: 'token' });
+    await siteBuild.startSiteJob({ kind: 'refresh' }, published);
+    expect(siteBuild.siteJob()).toMatchObject({ phase: 'token' });
     expect(calls).toHaveLength(0);
     vi.useFakeTimers();
     site([[{ status: 'completed', conclusion: 'success' }]], () => false, () => ({ builtAt: '2026-10-22T18:01:00Z' }));
     gh.setToken('github_pat_test');
-    siteBuild.resumeRefresh();
+    siteBuild.resumeSiteJob();
     await vi.advanceTimersByTimeAsync(5000);
     expect(published).toHaveBeenCalledOnce();
-    expect(siteBuild.siteRefresh()).toBeNull();
-    // Blank keeps the temporary league the site already has.
-    expect(JSON.parse(String(calls.find(c => c.url.endsWith('/dispatches'))?.init?.body))).toMatchObject({ inputs: { guest_league: '' } });
+    expect(siteBuild.siteJob()).toBeNull();
+    // No inputs: the build keeps the temporary league the site already has.
+    expect(JSON.parse(String(calls.find(c => c.url.endsWith('/dispatches'))?.init?.body)).inputs).toEqual({});
   });
 
   it('waits until Pages serves a build newer than the run it started', async () => {
@@ -127,16 +127,45 @@ describe('Refresh on the static site', () => {
     let builtAt = '2026-10-22T17:50:00Z';
     site([[{ status: 'in_progress' }, { status: 'completed', conclusion: 'success' }]], () => false, () => ({ builtAt }));
     const published = vi.fn();
-    const task = siteBuild.refreshSite(published);
+    const task = siteBuild.startSiteJob({ kind: 'refresh' }, published);
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(siteBuild.siteRefresh()).toMatchObject({ phase: 'publishing' });
+    expect(siteBuild.siteJob()).toMatchObject({ phase: 'publishing' });
     expect(published).not.toHaveBeenCalled();
     // A second tap while it runs starts nothing new.
-    await siteBuild.refreshSite(published);
+    await siteBuild.startSiteJob({ kind: 'refresh' }, published);
     expect(calls.filter(c => c.url.endsWith('/dispatches'))).toHaveLength(1);
     builtAt = '2026-10-22T18:00:40Z';
     await vi.advanceTimersByTimeAsync(5000);
     await task;
     expect(published).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Saving a league from the static site', () => {
+  const dispatched = () => calls.filter(c => c.url.endsWith('/dispatches')).map(c => JSON.parse(String(c.init?.body)).inputs as Record<string, string>);
+
+  it('asks the Deploy workflow to save it, taking over from a refresh that is running', async () => {
+    vi.useFakeTimers();
+    site([[{ status: 'queued' }], [{ status: 'in_progress' }, { status: 'completed', conclusion: 'success' }]], () => false, () => ({ builtAt: '2026-10-22T18:00:40Z' }));
+    void siteBuild.startSiteJob({ kind: 'refresh' }, vi.fn());
+    await vi.advanceTimersByTimeAsync(1000);
+    const published = vi.fn();
+    const task = siteBuild.startSiteJob({ kind: 'save', league: GUEST, name: 'Other League' }, published);
+    expect(siteBuild.siteJob()?.job).toEqual({ kind: 'save', league: GUEST, name: 'Other League' });
+    // A refresh now would rebuild nothing the save doesn't.
+    await siteBuild.startSiteJob({ kind: 'refresh' }, vi.fn());
+    await vi.advanceTimersByTimeAsync(15_000);
+    await task;
+    expect(dispatched()).toEqual([{}, { save_league: GUEST }]);
+    expect(published).toHaveBeenCalledOnce();
+  });
+
+  it('removes a saved league with forget_league', async () => {
+    vi.useFakeTimers();
+    site([[{ status: 'completed', conclusion: 'success' }]], () => false, () => ({ builtAt: '2026-10-22T18:00:40Z' }));
+    const task = siteBuild.startSiteJob({ kind: 'forget', league: GUEST, name: 'Other League' }, vi.fn());
+    await vi.advanceTimersByTimeAsync(5000);
+    await task;
+    expect(dispatched()).toEqual([{ forget_league: GUEST }]);
   });
 });

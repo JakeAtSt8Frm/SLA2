@@ -219,15 +219,18 @@ export const buildsUrl = `https://github.com/${REPO}/actions/workflows/${DEPLOY}
 export interface SiteBuild { id: number; url: string }
 export interface BuildRun { status: string; conclusion: string | null; created_at: string }
 
+/** Deploy workflow inputs: a temporary league (blank keeps the current one), or a league to save or remove. */
+export interface SiteBuildInputs { guest_league?: string; save_league?: string; forget_league?: string }
+
 /**
- * Starts a site build now: every league rebuilt from Sleeper/ESPN, plus `guestLeague` as the
- * temporary league (blank keeps the current one). GitHub answers with the run it started
- * (return_run_details); null if it didn't say, and findSiteBuild looks for it instead.
+ * Starts a site build now: every league rebuilt from Sleeper/ESPN, plus whatever `inputs` ask for.
+ * GitHub answers with the run it started (return_run_details); null if it didn't say, and
+ * findSiteBuild looks for it instead.
  */
-export async function startSiteBuild(guestLeague = ''): Promise<SiteBuild | null> {
+export async function startSiteBuild(inputs: SiteBuildInputs = {}): Promise<SiteBuild | null> {
   const run = await gh<{ workflow_run_id?: number; html_url?: string } | null>(`/repos/${REPO}/actions/workflows/${DEPLOY}/dispatches`, {
     method: 'POST',
-    body: JSON.stringify({ ref: REF, inputs: { guest_league: guestLeague }, return_run_details: true }),
+    body: JSON.stringify({ ref: REF, inputs, return_run_details: true }),
   });
   return run?.workflow_run_id ? { id: run.workflow_run_id, url: run.html_url ?? buildsUrl } : null;
 }
