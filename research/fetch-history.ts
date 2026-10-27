@@ -4,7 +4,7 @@
  * nflverse schedule/lines, injury reports and the Sleeper↔GSIS ID crosswalk.
  * Safe to re-run; cached weeks are not re-downloaded.
  */
-import { writeFile, mkdir, access } from 'node:fs/promises';
+import { writeFile, mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { nflGames, sleeper, sleeperSchedule, weekProjections, weekStats, type NflState } from '../server/sleeper.ts';
 
@@ -23,10 +23,10 @@ export async function completedThrough(state: NflState): Promise<number> {
   return games.length && games.every(g => g.status === 'complete') ? state.week : state.week - 1;
 }
 
-async function download(url: string, file: string) {
+/** Downloads `url` unless a copy younger than `maxAge` (ms) is already on disk. */
+async function download(url: string, file: string, maxAge = Number.POSITIVE_INFINITY) {
   try {
-    await access(file);
-    return;
+    if (Date.now() - (await stat(file)).mtimeMs < maxAge) return;
   } catch { /* not downloaded yet */ }
   const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`${response.status} ${url}`);
@@ -67,11 +67,13 @@ async function main() {
     }
   }));
 
-  // Injury reports (availability model) and ID crosswalk.
+  // Injury reports (availability model) and ID crosswalk. This season's report grows every week.
   for (let season = FIRST_SEASON; season <= currentSeason; season++) {
-    await download(`https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_${season}.csv`, path.join(RAW_DIR, `injuries_${season}.csv`)).catch(e => console.warn('injuries', season, e.message));
+    const maxAge = season === currentSeason ? 12 * 3_600_000 : Number.POSITIVE_INFINITY;
+    await download(`https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_${season}.csv`, path.join(RAW_DIR, `injuries_${season}.csv`), maxAge).catch(e => console.warn('injuries', season, e.message));
   }
-  await download('https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_playerids.csv', path.join(RAW_DIR, 'db_playerids.csv'));
+  // The ID crosswalk gains each season's rookies as they appear.
+  await download('https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_playerids.csv', path.join(RAW_DIR, 'db_playerids.csv'), 7 * 24 * 3_600_000);
   console.log('fetch complete');
 }
 

@@ -455,9 +455,13 @@ export function weekStats(f: WeekFreshness): Promise<WeekLine[]> {
 /**
  * The current week's rows carry the freshest injury tags, so they are rechecked every few minutes
  * (Sleeper's CDN refreshes every 10); later weeks change slowly. Unchanged copies cost a 304.
+ * The week just finished is rechecked too, so a copy cached mid-week gives way to the final
+ * projections that every earlier season's training rows use. Older weeks stay put: each row carries
+ * the player's current injury, so their validators change all the time.
  */
 function projectionsTtl(f: WeekFreshness): number {
-  if (f.season < f.currentSeason || f.week < f.currentWeek) return FOREVER;
+  if (f.season < f.currentSeason || f.week < f.currentWeek - 1) return FOREVER;
+  if (f.week < f.currentWeek) return 12 * HOUR;
   return f.week === f.currentWeek ? 5 * MINUTE : 20 * MINUTE;
 }
 
