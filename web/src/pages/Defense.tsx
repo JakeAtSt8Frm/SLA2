@@ -26,7 +26,7 @@ export default function DefensePage() {
   const d = q.data;
   const rows = useMemo(() => d?.groups[group] ?? [], [d, group]);
   const { sorted, header } = useSort(rows, { key: 'score', dir: 'desc' }, {
-    team: r => r.team, score: r => r.score, player: r => r.playerScore, ppg: r => r.pointsPerGame, adj: r => r.adjustedPerGame, last4: r => r.last4,
+    team: r => r.team, score: r => r.score, player: r => r.playerScore, ppg: r => r.pointsPerGame, adj: r => r.adjustedPerGame, last3: r => r.last3, last4: r => r.last4,
     ceil: r => r.ceilingRate, floor: r => r.floorRate, top10: r => r.top10Rate, opp: r => r.opportunitiesPerGame, eff: r => r.efficiency, games: r => r.games,
   });
   if (q.isPending) return <PageSkeleton />;
@@ -82,6 +82,7 @@ export default function DefensePage() {
                   {header('ppg', 'Allowed/gm', 'r')}
                   {header('adj', 'Adj/gm', 'r')}
                   {header('last4', 'Last 4', 'r')}
+                  {header('last3', 'Last 3', 'r')}
                   {header('ceil', 'Ceiling%', 'r')}
                   {header('floor', 'Floor%', 'r')}
                   {header('top10', 'Top-10%', 'r')}
@@ -101,6 +102,7 @@ export default function DefensePage() {
                     <td className="r font-semibold">{fmt(r.pointsPerGame)}</td>
                     <td className="r">{fmt(r.adjustedPerGame)}</td>
                     <td className="r">{fmt(r.last4)}</td>
+                    <td className="r">{fmt(r.last3)}</td>
                     <td className="r text-ink-2">{pct(r.ceilingRate)}</td>
                     <td className="r text-ink-2">{pct(r.floorRate)}</td>
                     <td className="r text-ink-2">{pct(r.top10Rate)}</td>

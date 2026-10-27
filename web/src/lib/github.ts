@@ -9,11 +9,15 @@ const WORKFLOW = 'claim.yml';
 const API = 'https://api.github.com';
 const TOKEN_KEY = 'sla-github-token';
 /**
- * Token baked into the build (VITE_GITHUB_TOKEN): claims work with zero setup on every device.
- * It is public to anyone who can open the site — scope it to this repository's Actions and
- * rotate it, not the deployment, when needed. A token pasted in this browser overrides it.
+ * Token baked into the build (VITE_GITHUB_TOKEN, from the CLAIM_TOKEN deploy secret): claims,
+ * Refresh and league saves work with zero setup on every device. It is public to anyone who can
+ * open the site, so scope it to this repository's Actions and rotate it (the secret, then
+ * redeploy) when needed. VITE_NO_BAKED_TOKEN builds without it (tests). A token pasted in this
+ * browser overrides it.
  */
-const BAKED = ((import.meta.env.VITE_GITHUB_TOKEN as string | undefined) ?? '').trim() || null;
+const BAKED = (import.meta.env.VITE_NO_BAKED_TOKEN as string | undefined)
+  ? null
+  : ((import.meta.env.VITE_GITHUB_TOKEN as string | undefined) ?? '').trim() || null;
 
 export const githubRepo = REPO;
 export const githubClaims = REPO.length > 0;

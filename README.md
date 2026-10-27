@@ -238,14 +238,15 @@ for example after the ESPN login expires, keeps its last published data. A deplo
 (the first took 41 s), so on a private repository the schedule uses roughly 850 of Pro's 3,000 monthly
 Actions minutes in season, plus about 120 for the weekly retrain.
 
-**Claim token (ESPN claims from the site).** Claims start claim.yml with the owner's own fine-grained
-GitHub token, which each browser stores in localStorage and pastes once per device. Alternatively set the
-`CLAIM_TOKEN` repository secret (`gh secret set CLAIM_TOKEN`, locally `.env.local` with
-`VITE_GITHUB_TOKEN=…`) and the build bakes it in — then no device needs any setup. What that costs: the
-baked token ships in the site's JavaScript, public to anyone who can open the link. It only permits Actions
-read/write on this repository, but anyone could use it to start claim jobs, which make real ESPN moves, so
-keep it scoped to this repository and revoke it if rogue runs appear. A token pasted in the browser
-overrides the baked one until cleared ("Reset to built-in token").
+**GitHub token (claims, Refresh and saving leagues from the site).** These start workflows in this
+repository with a fine-grained GitHub token (Actions: read and write on this repository only). Set it
+once as the `CLAIM_TOKEN` repository secret (`gh secret set CLAIM_TOKEN`, locally `.env.local` with
+`VITE_GITHUB_TOKEN=…`) and every build bakes it in, so no device needs any setup. Never commit the token
+itself; GitHub's push protection rejects it. What baking costs: the token ships in the site's JavaScript,
+public to anyone who can open the link. Anyone could use it to start claim jobs, which make real ESPN
+moves, so keep it scoped to this repository and rotate it (update the secret and redeploy) if rogue runs
+appear. Without the secret, each browser pastes its own token once; a pasted token overrides the baked
+one until cleared ("Reset to built-in token").
 
 `.github/workflows/retrain.yml` retrains all three models every Wednesday (after Monday night's game),
 runs `npm run check` (including the TypeScript-vs-scikit-learn parity test), commits the model files and

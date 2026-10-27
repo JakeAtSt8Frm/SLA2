@@ -985,7 +985,7 @@ export async function defense(id: string, requestedSeason?: number): Promise<Def
     return {
       season, seasons, week: core.week, throughWeek: weeks.at(-1)?.week ?? 0, weeks: weeks.map(w => w.week), upcoming,
       groups: Object.fromEntries([...index].map(([g, rows]) => [g, rows.map(r => ({
-        ...r, pointsPerGame: r1(r.pointsPerGame), adjustedPerGame: r1(r.adjustedPerGame), last4: r1(r.last4), ceilingRate: pct(r.ceilingRate),
+        ...r, pointsPerGame: r1(r.pointsPerGame), adjustedPerGame: r1(r.adjustedPerGame), last3: r1(r.last3), last4: r1(r.last4), ceilingRate: pct(r.ceilingRate),
         floorRate: pct(r.floorRate), top10Rate: pct(r.top10Rate), opportunitiesPerGame: r1(r.opportunitiesPerGame), efficiency: r2(r.efficiency), volatility: r1(r.volatility),
       }))])) as Record<string, DefenseRow[]>,
     };

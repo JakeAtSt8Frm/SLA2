@@ -19,6 +19,7 @@ export interface DefenseRow {
   playerScore: number;
   pointsPerGame: number;
   adjustedPerGame: number;
+  last3: number;
   last4: number;
   ceilingRate: number;
   floorRate: number;
@@ -156,7 +157,7 @@ export function buildDefenseIndex(weeks: readonly WeekInput[], players: Record<s
       const opps = mean(weeksSorted.map(w => wk.get(w)!.opp));
       const perf = performances.get(g)!.get(team) ?? [];
       return {
-        team, ppg, last4: mean(pts.slice(-4)) || ppg, volatility: stdev(pts), games: weeksSorted.length,
+        team, ppg, last3: mean(pts.slice(-3)) || ppg, last4: mean(pts.slice(-4)) || ppg, volatility: stdev(pts), games: weeksSorted.length,
         ceilingRate: perf.length ? perf.filter(p => p >= p75).length / perf.length : 0,
         floorRate: perf.length ? perf.filter(p => p <= p25).length / perf.length : 0,
         top10Rate: weeksSorted.length ? (top10.get(g)!.get(team) ?? 0) / weeksSorted.length : 0,
@@ -181,7 +182,7 @@ export function buildDefenseIndex(weeks: readonly WeekInput[], players: Record<s
       team: r.team,
       score: Math.round((scorePct.get(r.team) ?? 0.5) * 1000) / 10,
       playerScore: Math.round(((adjPct.get(r.team) ?? 0.5) * 0.6 + (oppPct.get(r.team) ?? 0.5) * 0.4) * 1000) / 10,
-      pointsPerGame: r.ppg, adjustedPerGame: r.adjusted, last4: r.last4, ceilingRate: r.ceilingRate, floorRate: r.floorRate,
+      pointsPerGame: r.ppg, adjustedPerGame: r.adjusted, last3: r.last3, last4: r.last4, ceilingRate: r.ceilingRate, floorRate: r.floorRate,
       top10Rate: r.top10Rate, opportunitiesPerGame: r.opps, efficiency: r.efficiency, volatility: r.volatility, games: r.games,
       rank: rankOf.get(r.team)!, weekly: r.weekly,
     })).sort((a, b) => b.score - a.score));

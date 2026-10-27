@@ -13,6 +13,8 @@ const location = { pathname: '/league/1312656463549726720/hub', search: '' };
 beforeAll(async () => {
   vi.stubEnv('VITE_GITHUB_REPO', 'owner/repo');
   vi.stubEnv('VITE_STATIC', '1');
+  // Simulate a build without the owner's embedded token, as the token-phase test needs.
+  vi.stubEnv('VITE_NO_BAKED_TOKEN', '1');
   const store = new Map<string, string>();
   vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) });
   const go = (_: unknown, __: string, to: string) => { const u = new URL(to, 'http://site'); location.pathname = u.pathname; location.search = u.search; };
